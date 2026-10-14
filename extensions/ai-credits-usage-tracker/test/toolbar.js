@@ -6,7 +6,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 
-const TITLE = 'AI Credits Usage Tracker';
+const TITLE = 'GH Copilot Usage Tracker';
 const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const extensionId = `${manifest.publisher}.${manifest.name}`;
@@ -174,7 +174,7 @@ async function main() {
         editorTabs: Array.from(document.querySelectorAll('.tabs-container .tab')).map(e => e.textContent) };
     })()`;
     const initialLayout = await cdp.evaluate(layoutExpression);
-    console.log('Hovering the native AI credits status item');
+    console.log('Hovering the native GitHub Copilot usage status item');
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: button.x, y: button.y });
     const hoverExpression = `(() => {
       const hover = Array.from(document.querySelectorAll('.monaco-hover')).find(e =>

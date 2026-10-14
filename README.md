@@ -5,7 +5,7 @@ Two independent VS Code extensions maintained under the public `apkola29` namesp
 | Project | Purpose | Status |
 | --- | --- | --- |
 | [Agent Keep-Awake](extensions/agent-keep-awake/README.md) | Explicit, OS-native sleep prevention with Off / Keep awake / timed-session controls. | Manual-mode preview; automatic Copilot activity detection is unavailable. |
-| [AI Credits Usage Tracker](extensions/ai-credits-usage-tracker/README.md) | Compact native hover and dismissible popup for local GitHub Copilot credits and tokens by model. | Public release candidate; GitHub Copilot default, Claude Code preview. |
+| [GH Copilot Usage Tracker](extensions/ai-credits-usage-tracker/README.md) | Tracks **GitHub Copilot usage**: local credits and tokens by model/month, shown in a compact hover and popup. | GitHub Copilot is the supported default; Claude Code is a separate preview. |
 
 Neither extension reroutes prompts, modifies Copilot, or requires a hardcoded identity.
 Each project has its own manifest, license, tests, and independently installable VSIX.
@@ -15,10 +15,46 @@ Each project has its own manifest, license, tests, and independently installable
 Download the matching `.vsix` from [GitHub Releases](https://github.com/apkola29/vscode_extensions/releases).
 In VS Code, use **Extensions: Install from VSIX...**, then reload that window.
 
-Marketplace publication uses a separate Visual Studio Marketplace publisher authorization.
-GitHub sign-in by itself does not grant permission to publish a Marketplace extension.
-Release availability and any preview limitations are documented per project; do not assume an
-unpublished Marketplace listing exists.
+Marketplace listings:
+
+- [GH Copilot Usage Tracker](https://marketplace.visualstudio.com/items?itemName=apkola29.ai-usage-credits-meter) — `apkola29.ai-usage-credits-meter`.
+- [Agent Keep-Awake](https://marketplace.visualstudio.com/items?itemName=apkola29.agent-keep-awake) — `apkola29.agent-keep-awake`; choose the **pre-release** manual-mode preview.
+
+The stable extension IDs and project directories are retained for compatibility. Tracker usage is local/device-scoped, not an official account-wide GitHub bill. Keep-awake does not automatically detect Copilot activity or chat completion.
+
+## Repository structure
+
+```text
+vscode_extensions/
+  README.md
+  PRIVACY.md
+  SECURITY.md
+  PUBLISHING.md
+  LICENSE
+  .github/workflows/ci.yml
+  extensions/
+    agent-keep-awake/
+      README.md
+      CHANGELOG.md
+      LICENSE
+      package.json
+      src/
+      test/
+      images/
+    ai-credits-usage-tracker/
+      README.md
+      CHANGELOG.md
+      LICENSE
+      package.json
+      extension.js
+      lib/
+      test/
+      media/
+      scripts/
+```
+
+Each Marketplace overview is generated from its own project's `README.md`, not the root landing page.
+The root README links both projects and their installation instructions; both manifests point to this repository and the correct `repository.directory`.
 
 ## Develop and test
 

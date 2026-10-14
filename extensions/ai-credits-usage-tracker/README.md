@@ -1,6 +1,10 @@
-# AI Credits Usage Tracker
+# GH Copilot Usage Tracker
 
-Adds a compact **AI credits** indicator to the **bottom-right status bar**. It does not open the Terminal or a docked panel.
+**Track your GitHub Copilot usage by model: AI credits, input/output tokens, and monthly usage totals.**
+
+GH Copilot Usage Tracker works with **GitHub Copilot Chat in VS Code, Copilot agent sessions, the Copilot SDK, and Copilot CLI** using usage records available on your local device. It adds a compact **Copilot credits** indicator to the **bottom-right status bar**, with a small hover summary and click popup—not a Terminal or docked panel.
+
+This independent community extension is **not an official GitHub product or an account-wide billing report**. Estimates and partial data are labeled. Nothing is uploaded to a usage-collection service.
 
 The status bar is used because stable VS Code APIs support rich native hover content there, but do not expose a custom hover window attached to the chat-toolbar contribution. No private APIs or renderer injection are used.
 
@@ -9,13 +13,15 @@ The extension reads one configured provider at a time:
 * **GitHub Copilot** — supported default: VS Code chat, agent sessions, SDK and CLI.
 * **Claude Code** — preview provider: local Claude Code transcripts.
 
-Use **AI Credits Usage Tracker: Select Chat Provider** from the Command Palette or the `aiUsageCreditsMeter.provider` setting. This release defaults to GitHub Copilot and does not mix providers in one total.
+Use **GH Copilot Usage Tracker: Select Chat Provider** from the Command Palette or the `aiUsageCreditsMeter.provider` setting. This release defaults to GitHub Copilot and does not mix providers in one total. A Claude or Gemini model used **inside GitHub Copilot** still counts as Copilot usage; the separate Claude Code provider is an explicit preview only.
 
 ## Install
 
-Download the `.vsix` from [the project releases](https://github.com/apkola29/vscode_extensions/releases), then
+Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=apkola29.ai-usage-credits-meter), or download the `.vsix` from [the project releases](https://github.com/apkola29/vscode_extensions/releases), then
 run **Extensions: Install from VSIX...** and reload the window. Requires desktop VS Code **1.141 or newer**.
 This is an independent community extension, not an official GitHub or Anthropic product.
+
+The extension ID remains **`apkola29.ai-usage-credits-meter`** so existing installs update normally; its visible name is **GH Copilot Usage Tracker**. Command and setting IDs are unchanged for compatibility.
 
 ## What you see
 
@@ -25,7 +31,7 @@ This is an independent community extension, not an official GitHub or Anthropic 
 
 * Each compact row shows credits and tokens. Selecting a model copies its row.
 * The popup has **Refresh** and a **tokens/credits ranking toggle**.
-* **Command Palette:** `AI Credits Usage Tracker: Show Compact Usage Popup` opens the same small list.
+* **Command Palette:** `GH Copilot Usage Tracker: Show Compact Usage Popup` opens the same small list.
 * **Show Detailed Dashboard** remains optional in the Command Palette; it is never opened by a normal hover or click.
 * **Use My GitHub Account:** reuse VS Code's GitHub sign-in rather than entering a PAT or username.
 
@@ -91,8 +97,8 @@ npm run test:vscode -- --agents # run it in the Agents/Sessions window
 npm run test:popup     # real hover -> mouse-leave dismissal; click -> close/Escape/click-away
 npm run package        # build the .vsix offline
 npm run package:vsce   # standard vsce package and its credential/file checks
-node test\toolbar.js --vsix ai-usage-credits-meter-0.4.1.vsix # same native-UI test on the installed package
-code --install-extension ai-usage-credits-meter-0.4.1.vsix
+node test\toolbar.js --vsix ai-usage-credits-meter-0.4.2.vsix # same native-UI test on the installed package
+code --install-extension ai-usage-credits-meter-0.4.2.vsix
 ```
 
 Requires VS Code 1.141+. It uses the built-in `node:sqlite`, so there are no native dependencies. UI-click tests launch an isolated profile with a temporary loopback debugging port and stop only their owned processes (matching PID and creation time) on exit; those test scripts are excluded from the VSIX.

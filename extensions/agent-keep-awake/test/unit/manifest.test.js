@@ -29,8 +29,8 @@ test('activates lazily after start-up and runs on the local machine first', () =
   assert.ok(fs.existsSync(path.join(root, pkg.main)));
 });
 
-test('is the 1.1.0 local preview, and the lockfile root metadata agrees without touching dependencies', () => {
-  assert.equal(pkg.version, '1.1.0');
+test('is the 1.1.1 documentation preview, and the lockfile root metadata agrees without touching dependencies', () => {
+  assert.equal(pkg.version, '1.1.1');
   assert.equal(lock.name, pkg.name);
   assert.equal(lock.version, pkg.version);
   const rootEntry = lock.packages[''];

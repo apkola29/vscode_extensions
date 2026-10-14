@@ -1,4 +1,6 @@
-# Agent Keep-Awake - local manual-mode preview
+# Agent Keep-Awake
+
+**Manual-mode preview: keep your computer awake while you run Copilot or other agent work.**
 
 **Keep your normal coding workflow. Choose a power mode, not a different chat.**
 
@@ -20,7 +22,7 @@ Requirements: **desktop VS Code 1.95 or newer**. Manual power control needs
 no hooks, model account, API key, or subscription. Windows is the validated
 native-request target; macOS/Linux protection remains explicitly unverified.
 
-1. Download the preview VSIX from [GitHub Releases](https://github.com/apkola29/vscode_extensions/releases)
+1. Install the **pre-release** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=apkola29.agent-keep-awake), or download the preview VSIX from [GitHub Releases](https://github.com/apkola29/vscode_extensions/releases)
    and install it through **Extensions: Install from VSIX...**
    in the Command Palette, or launch **Run Extension** with F5 from this project.
 2. Click the coffee control to open the **mode picker**.
@@ -245,21 +247,23 @@ does not establish that routing.
 The Local `Stop` event explicitly means **about to stop**, not inactive.
 Copilot's `agentStop` can also block and force continuation. No short
 silence timeout or arbitrary file activity is used as a substitute.
-The verified profile, metadata-only transport and real native UAT remain gates
-in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), not shipped features.
+The verified profile, metadata-only transport and real native UAT remain release gates, not shipped features.
+Private implementation notes are intentionally not part of the public repository or package.
 
 Sources:
 [Local hooks reference](https://code.visualstudio.com/docs/agents/reference/hooks-reference),
 [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference),
 [VS Code extension hosts](https://code.visualstudio.com/api/advanced-topics/extension-host).
 
-## Publication gate
+## Preview scope and publication
 
-The local VSIX is for UAT, not a Marketplace release. GitHub Actions is
-manual-only; there is no automatic release workflow. Publication stays paused
-until the user approves installation and UAT of the manual-mode candidate.
-Native Auto and unattended-sleep claims remain separately blocked until their
-evidence gates pass.
+This manual-mode preview is published with the owner's approval in the
+[two-extension repository](https://github.com/apkola29/vscode_extensions) and Marketplace pre-release channel.
+Repository CI runs synthetic tests and type checks; it does not publish automatically or silently start a power hold.
+Native Auto and unattended-sleep claims remain separately blocked until their evidence gates pass.
+
+The companion [GH Copilot Usage Tracker](../ai-credits-usage-tracker/README.md) tracks local GitHub Copilot
+credits and tokens. It is a separate extension; installing it does not enable keep-awake behavior.
 
 License: [MIT](LICENSE).
 

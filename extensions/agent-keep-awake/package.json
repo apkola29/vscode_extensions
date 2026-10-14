@@ -2,7 +2,7 @@
   "name": "agent-keep-awake",
   "displayName": "Agent Keep-Awake",
   "description": "One coffee icon to keep your computer awake for long agent runs: Off, or Keep awake until you turn it off. Auto - Copilot activity is unavailable in this preview.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "apkola29",
   "author": "apkola29",
   "license": "MIT",

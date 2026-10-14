@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 - documentation-only preview update
+
+- Add clear Marketplace pre-release installation instructions and monorepo navigation.
+- Remove a broken link to a private implementation handoff that is intentionally not published.
+- Clarify that the manual-mode preview is public while automatic Copilot activity remains unavailable.
+- No power-control, timer, coordinator, identity or helper behavior changes.
+
 ## 1.1.0 - manual-mode and owner-coordinator preview
 
 - Adopt the implementation handoff's Off / Keep awake / Auto mode controls.

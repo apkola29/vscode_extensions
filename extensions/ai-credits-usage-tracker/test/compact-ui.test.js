@@ -149,7 +149,8 @@ test('default UI is an untrusted native hover with only the top five models, not
     const item = h.statusItems[0];
     assert.equal(item.visible, true);
     assert.equal(item.command, 'aiUsageCreditsMeter.show');
-    assert.equal(item.accessibilityInformation.label, 'AI Credits Usage Tracker');
+    assert.equal(item.accessibilityInformation.label, 'GH Copilot Usage Tracker');
+    assert.match(item.text, /Copilot/);
     assert.match(item.text, /360 credits/);
     assert.equal(item.tooltip.isTrusted, false);
     assert.equal(item.tooltip.supportHtml, false);
@@ -174,6 +175,7 @@ test('click opens a small popup with close, focus-loss dismissal and reusable ca
     assert.equal(pick.items[5].expand, true);
     assert.ok(pick.buttons.some((b) => b.iconPath.id === 'close'));
     assert.match(shown.title, /360 credits/);
+    assert.match(shown.title, /^GH Copilot Usage Tracker/);
     assert.equal(h.scans, 1, 'click reuses the startup summary instead of creating another scan');
     await h.commands.get('aiUsageCreditsMeter.show')();
     assert.equal(h.picks.length, 1, 'repeated clicks do not leak popups');

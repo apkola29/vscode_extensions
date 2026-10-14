@@ -14,6 +14,10 @@ test('public manifest contains approved attribution and a real open-source licen
   assert.equal(manifest.private, undefined);
   assert.equal(manifest.repository.url, 'https://github.com/apkola29/vscode_extensions.git');
   assert.equal(manifest.repository.directory, 'extensions/ai-credits-usage-tracker');
+  assert.equal(manifest.displayName, 'GH Copilot Usage Tracker');
+  assert.equal(manifest.name, 'ai-usage-credits-meter', 'existing Marketplace installs keep their extension identity');
+  assert.match(manifest.description, /GitHub Copilot usage/);
+  assert.doesNotMatch(manifest.description, /https?:\/\/|github\.com/i, 'repository links belong in dedicated metadata, not the short description');
   assert.ok(fs.readFileSync(path.join(root, 'LICENSE'), 'utf8').includes('MIT License'));
 });
 

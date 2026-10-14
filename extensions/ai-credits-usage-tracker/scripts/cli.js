@@ -14,7 +14,7 @@ const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1
     sortBy: value('--sort', 'tokens'), validate: flag('--validate'), resetDay: Number(value('--reset-day', 1)),
   });
   if (flag('--json')) { console.log(JSON.stringify(r, null, 2)); return; }
-  console.log(`AI Credits Usage Tracker · ${r.provider} · billing cycle (UTC): ${r.cycle.start.slice(0, 10)} -> ${r.cycle.end.slice(0, 10)} · sorted by ${r.sortBy} (≈ = includes estimate)`);
+  console.log(`GH Copilot Usage Tracker · ${r.provider} · billing cycle (UTC): ${r.cycle.start.slice(0, 10)} -> ${r.cycle.end.slice(0, 10)} · sorted by ${r.sortBy} (≈ = includes estimate)`);
   console.log('rank  model                 tokens  (exact | est)        output    credits (exact | est)       ~USD  calls pending  by tool');
   r.models.forEach((m, i) => {
     const approx = m.estCredits > 0.5 ? '≈' : ' ';

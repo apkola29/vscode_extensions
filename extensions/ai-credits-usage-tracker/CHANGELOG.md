@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- Rename the visible extension, hover, popup, Command Palette categories and output channel to **GH Copilot Usage Tracker**.
+- Clearly describe GitHub Copilot credits/token usage tracking and local-device versus account-wide billing boundaries.
+- Preserve extension, command, setting and repository-directory IDs for update compatibility.
+- Document Marketplace installation and the two-project repository structure; validate README links and packaged overview content.
+
 ## 0.4.1
 
 Initial public release of AI Credits Usage Tracker.

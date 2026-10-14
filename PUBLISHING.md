@@ -20,10 +20,10 @@ From the repository root:
 New-Item -ItemType Directory -Force release-artifacts
 
 Set-Location extensions\ai-credits-usage-tracker
-npx --yes @vscode/vsce@4.0.0 package --no-dependencies --out ..\..\release-artifacts\ai-usage-credits-meter-0.4.1.vsix
+npx --yes @vscode/vsce@4.0.0 package --no-dependencies --out ..\..\release-artifacts\ai-usage-credits-meter-0.4.2.vsix
 
 Set-Location ..\agent-keep-awake
-npx --yes @vscode/vsce@4.0.0 package --no-dependencies --pre-release --out ..\..\release-artifacts\agent-keep-awake-1.1.0-preview.vsix
+npx --yes @vscode/vsce@4.0.0 package --no-dependencies --pre-release --out ..\..\release-artifacts\agent-keep-awake-1.1.1-preview.vsix
 ```
 
 VSIX files belong in GitHub Releases, not git history. The tracker has no runtime npm dependencies.
@@ -57,7 +57,7 @@ An `Access Denied` response is a stop condition, not something to work around.
 After secure authorization succeeds:
 
 ```powershell
-npx --yes @vscode/vsce@4.0.0 publish --packagePath release-artifacts\ai-usage-credits-meter-0.4.1.vsix
+npx --yes @vscode/vsce@4.0.0 publish --packagePath release-artifacts\ai-usage-credits-meter-0.4.2.vsix
 ```
 
 For authorized Entra authentication, add `--azure-credential`.

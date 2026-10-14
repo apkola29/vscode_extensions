@@ -5,6 +5,7 @@ const vscode = require('vscode');
 const { UsageWorkerClient } = require('./lib/worker-client');
 const { githubIdentity, connectGitHub } = require('./lib/github-identity');
 
+const TRACKER_NAME = 'GH Copilot Usage Tracker';
 const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n)));
 const credits = (n) => Math.round(n).toLocaleString('en-US');
 const usd = (c) => `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -29,7 +30,7 @@ function runAggregation(opts) {
   if (!workerClient) workerClient = new UsageWorkerClient(path.join(__dirname, 'lib', 'worker.js'), {
     onError: () => {
       output?.appendLine('Usage worker cleanup failed');
-      vscode.window.showErrorMessage('AI Credits Usage Tracker could not stop its worker. Reload the window before retrying.');
+      vscode.window.showErrorMessage(`${TRACKER_NAME} could not stop its worker. Reload the window before retrying.`);
     },
   });
   return workerClient.run(opts);
@@ -56,12 +57,12 @@ async function selectProvider() {
     detail: p.description,
     id,
   })), {
-    title: 'AI Credits Usage Tracker: Select Chat Provider',
+    title: `${TRACKER_NAME}: Select Chat Provider`,
     placeHolder: 'Choose the provider whose local usage should be tracked',
   });
   if (!picked || picked.id === current) return picked?.id || current;
   await cfg.update('provider', picked.id, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`AI Credits Usage Tracker is now connected to ${PROVIDERS[picked.id].label}.`);
+  vscode.window.showInformationMessage(`${TRACKER_NAME} is now connected to ${PROVIDERS[picked.id].label}.`);
   output?.appendLine(`[${new Date().toISOString()}] provider changed: ${current} -> ${picked.id}`);
   return picked.id;
 }
@@ -110,7 +111,7 @@ function hoverSummary(result, identity) {
   const provider = PROVIDERS[result.provider] || { label: result.provider };
   const hasEstimate = result.totals.estCredits > 0.5;
   const lines = [
-    '**AI Credits Usage Tracker**',
+    `**${TRACKER_NAME}**`,
     `${markdownText(provider.label)} · ${day(result.cycle.start)}–${day(result.cycle.end)} UTC`,
     `**${hasEstimate ? '≈' : ''}${credits(result.totals.totalCredits)} credits** · ${fmt(result.totals.totalTokens)} tokens`,
     '',
@@ -137,8 +138,8 @@ function invalidatePreview() {
   latestPreview = undefined;
   previewRequest = undefined;
   if (statusItem) {
-    statusItem.text = '$(pie-chart) AI credits';
-    statusItem.tooltip = 'AI Credits Usage Tracker — click for usage; the summary refreshes when opened.';
+    statusItem.text = '$(pie-chart) Copilot usage';
+    statusItem.tooltip = `${TRACKER_NAME} — click for usage; the summary refreshes when opened.`;
   }
 }
 
@@ -148,22 +149,22 @@ async function refreshPreview(force = false) {
   if (!force && latestPreview?.key === key && Date.now() - latestPreview.updatedAt < 60000) return latestPreview;
   const generation = ++previewGeneration;
   if (statusItem) {
-    statusItem.text = '$(loading~spin) AI credits';
-    statusItem.tooltip = 'AI Credits Usage Tracker — reading local usage. Click to open the small popup.';
+    statusItem.text = '$(loading~spin) Copilot usage';
+    statusItem.tooltip = `${TRACKER_NAME} — reading local usage. Click to open the small popup.`;
   }
   const promise = Promise.all([compute(), accountIdentity()]).then(([result, identity]) => {
     const preview = { result, identity, key, updatedAt: Date.now() };
     if (!disposed && generation === previewGeneration && previewKey() === key) {
       latestPreview = preview;
-      statusItem.text = `$(pie-chart) ${fmt(result.totals.totalCredits)} credits`;
+      statusItem.text = `$(pie-chart) ${result.provider === 'claudeCode' ? 'Claude' : 'Copilot'} ${fmt(result.totals.totalCredits)} credits`;
       statusItem.tooltip = hoverSummary(result, identity);
       output?.appendLine(`Compact summary ready: ${result.models.length} model(s)`);
     }
     return preview;
   }, (error) => {
     if (!disposed && generation === previewGeneration) {
-      statusItem.text = '$(warning) AI credits';
-      statusItem.tooltip = `AI Credits Usage Tracker — unable to load usage: ${error.message}. Click to retry.`;
+      statusItem.text = '$(warning) Copilot usage';
+      statusItem.tooltip = `${TRACKER_NAME} — unable to load usage: ${error.message}. Click to retry.`;
       output?.appendLine('Compact usage summary failed to load');
     }
     throw error;
@@ -175,7 +176,7 @@ async function refreshPreview(force = false) {
 }
 
 const html = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const dashboardShell = (body, title = 'AI Credits Usage Tracker') => {
+const dashboardShell = (body, title = TRACKER_NAME) => {
   const nonce = crypto.randomBytes(16).toString('base64');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -227,7 +228,7 @@ function renderDashboard(result, identity) {
       <td class="num">${approximate}${html(fmt(m.totalTokens))}</td><td class="num">${approximate}${html(credits(m.totalCredits))}</td>
       <td class="num">${html(usd(m.totalCredits))}</td><td class="num">${html(m.calls)}</td></tr>`;
   }).join('');
-  return dashboardShell(`<header>${meterSvg}<div><h1>AI Credits Usage Tracker</h1>
+  return dashboardShell(`<header>${meterSvg}<div><h1>${TRACKER_NAME}</h1>
     <p class="subtitle">${html(provider.label)} · ${html(day(result.cycle.start))} – ${html(day(result.cycle.end))} UTC · ranked by ${html(result.sortBy)}</p></div></header>
     <p id="github-identity" class="source">${identity ? html(identity.status === 'signedIn' ? `VS Code GitHub account: ${identity.label}` : identity.label) : ''}</p>
     <p class="source">Local device usage, not an account-wide bill. Untagged historical requests cannot be attributed to a GitHub account.</p>
@@ -249,13 +250,13 @@ async function openDashboard() {
   try {
     panel = vscode.window.createWebviewPanel(
       'aiUsageCreditsMeter.dashboard',
-      'AI Credits Usage Tracker',
+      TRACKER_NAME,
       vscode.ViewColumn.Active,
       { enableScripts: false, localResourceRoots: [] },
     );
   } catch (e) {
     output?.appendLine(`Unable to create dashboard panel: ${e.stack || e.message}`);
-    vscode.window.showWarningMessage('AI Credits Usage Tracker could not open a dashboard here. Opening the quick list instead.');
+    vscode.window.showWarningMessage(`${TRACKER_NAME} could not open a dashboard here. Opening the quick list instead.`);
     return show();
   }
   panel.webview.html = dashboardShell(`<div class="loading" aria-live="polite"><div><div class="spinner"></div>
@@ -263,7 +264,7 @@ async function openDashboard() {
   try {
     const [result, identity] = await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
-      title: 'AI Credits Usage Tracker: reading configured provider usage',
+      title: `${TRACKER_NAME}: reading configured provider usage`,
       cancellable: false,
     }, () => Promise.all([compute(), accountIdentity()]));
     panel.webview.html = renderDashboard(result, identity);
@@ -271,9 +272,9 @@ async function openDashboard() {
     return { title: panel.title, provider: result.provider, items: result.models.map((m) => m.model), diagnostics: result.diagnostics };
   } catch (e) {
     output?.appendLine(`Dashboard failed: ${e.stack || e.message}`);
-    panel.webview.html = dashboardShell(`<header>${meterSvg}<div><h1>AI Credits Usage Tracker</h1></div></header>
+    panel.webview.html = dashboardShell(`<header>${meterSvg}<div><h1>${TRACKER_NAME}</h1></div></header>
       <div class="warning"><strong>Unable to read usage:</strong> ${html(e.message)}</div>`);
-    vscode.window.showErrorMessage(`AI Credits Usage Tracker failed: ${e.message}`);
+    vscode.window.showErrorMessage(`${TRACKER_NAME} failed: ${e.message}`);
     throw e;
   }
 }
@@ -287,7 +288,7 @@ async function show() {
   compactPick = qp;
   qp.matchOnDescription = true;
   qp.ignoreFocusOut = false;
-  qp.title = 'AI Credits Usage Tracker';
+  qp.title = TRACKER_NAME;
   qp.placeholder = 'Reading local usage…';
   let sortBy = vscode.workspace.getConfiguration('aiUsageCreditsMeter').get('sortBy', 'tokens');
   const sortButton = { iconPath: new vscode.ThemeIcon('arrow-swap'), tooltip: 'Toggle ranking: tokens / credits' };
@@ -307,7 +308,7 @@ async function show() {
       if (preview.key !== previewKey()) return load();
       const r = preview.result;
       const t = r.totals;
-      qp.title = `AI Credits Usage Tracker · ${t.estCredits > 0.5 ? '≈' : ''}${credits(t.totalCredits)} credits`;
+      qp.title = `${TRACKER_NAME} · ${t.estCredits > 0.5 ? '≈' : ''}${credits(t.totalCredits)} credits`;
       qp.placeholder = `${(PROVIDERS[r.provider] || {}).label || r.provider} · ${day(r.cycle.start)}–${day(r.cycle.end)} UTC · ${sortBy} · local history`;
       const sorted = [...r.models].sort((a, b) => sortBy === 'credits'
         ? b.totalCredits - a.totalCredits : b.totalTokens - a.totalTokens);
@@ -327,7 +328,7 @@ async function show() {
       if (!hidden && generation === loadGeneration) {
         qp.placeholder = `Failed to read usage: ${e.message}`;
         qp.items = [{ label: '$(warning) Usage could not be loaded. Use Refresh to retry.', alwaysShow: true }];
-        vscode.window.showErrorMessage(`AI Credits Usage Tracker failed: ${e.message}`);
+        vscode.window.showErrorMessage(`${TRACKER_NAME} failed: ${e.message}`);
       }
     } finally {
       if (!hidden && generation === loadGeneration) qp.busy = false;
@@ -357,7 +358,7 @@ async function show() {
   }));
   qp.show();
   await load();
-  return { title: hidden ? 'AI Credits Usage Tracker' : qp.title, items: hidden ? [] : qp.items.map((i) => i.label) };
+  return { title: hidden ? TRACKER_NAME : qp.title, items: hidden ? [] : qp.items.map((i) => i.label) };
 }
 
 function activate(context) {
@@ -367,15 +368,15 @@ function activate(context) {
   }
   extensionState = context.globalState;
   disposed = false;
-  output = vscode.window.createOutputChannel('AI Credits Usage Tracker');
+  output = vscode.window.createOutputChannel(TRACKER_NAME);
   output.appendLine(`[${new Date().toISOString()}] extension activated`);
   currentUserDirs = [path.resolve(storageUri.fsPath, '..', '..')];
   statusItem = vscode.window.createStatusBarItem('aiUsageCreditsMeter.status', vscode.StatusBarAlignment.Right, 50);
-  statusItem.name = 'AI Credits Usage Tracker';
-  statusItem.text = '$(pie-chart) AI credits';
-  statusItem.tooltip = 'AI Credits Usage Tracker — reading the local summary.';
+  statusItem.name = TRACKER_NAME;
+  statusItem.text = '$(pie-chart) Copilot usage';
+  statusItem.tooltip = `${TRACKER_NAME} — reading the local summary.`;
   statusItem.command = 'aiUsageCreditsMeter.show';
-  statusItem.accessibilityInformation = { label: 'AI Credits Usage Tracker', role: 'button' };
+  statusItem.accessibilityInformation = { label: TRACKER_NAME, role: 'button' };
   context.subscriptions.push(
     output,
     statusItem,
@@ -383,7 +384,7 @@ function activate(context) {
       vscode.window.showErrorMessage(`GitHub sign-in was not completed: ${e.message}`);
     })),
     vscode.commands.registerCommand('aiUsageCreditsMeter.refresh', () => refreshPreview(true).catch((e) => {
-      vscode.window.showErrorMessage(`AI Credits Usage Tracker failed: ${e.message}`);
+      vscode.window.showErrorMessage(`${TRACKER_NAME} failed: ${e.message}`);
       throw e;
     })),
     vscode.authentication.onDidChangeSessions((event) => {
