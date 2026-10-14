@@ -23,6 +23,28 @@ This is an independent community extension, not an official GitHub or Anthropic 
 
 The extension ID remains **`apkola29.ai-usage-credits-meter`** so existing installs update normally; its visible name is **GH Copilot Usage Tracker**. Command and setting IDs are unchanged for compatibility.
 
+## Screenshots
+
+These native VS Code captures use **synthetic usage and a fictional demo account**. The values illustrate the interface, not real usage, model availability, or pricing.
+
+### Status-bar indicator
+
+![Bottom-right status-bar indicator showing Copilot 2.5K credits with synthetic demo data](media/screenshots/status-bar.png)
+
+The compact indicator stays in the status bar without opening a Terminal or docked panel.
+
+### Hover summary
+
+![GH Copilot Usage Tracker hover showing a demo cycle total and five models ranked by credits](media/screenshots/usage-hover.png)
+
+Hover to see the cycle total and highest-credit models; move the pointer away to dismiss.
+
+### Click popup
+
+![Compact GH Copilot Usage Tracker popup showing synthetic model credits and token totals with ranking, refresh and close controls](media/screenshots/usage-popup.png)
+
+Click for the floating list. Close it with **×**, **Esc**, or a click outside.
+
 ## What you see
 
 **Hover:** a small native tooltip shows the cycle total and the five models with the highest credit usage. It disappears when the pointer moves away.
@@ -97,11 +119,14 @@ npm run test:vscode -- --agents # run it in the Agents/Sessions window
 npm run test:popup     # real hover -> mouse-leave dismissal; click -> close/Escape/click-away
 npm run package        # build the .vsix offline
 npm run package:vsce   # standard vsce package and its credential/file checks
-node test\toolbar.js --vsix ai-usage-credits-meter-0.4.2.vsix # same native-UI test on the installed package
-code --install-extension ai-usage-credits-meter-0.4.2.vsix
+node test\toolbar.js --vsix ai-usage-credits-meter-0.4.3.vsix # same native-UI test on the installed package
+node test\toolbar.js --screenshots media\screenshots # regenerate public-safe demo screenshots
+code --install-extension ai-usage-credits-meter-0.4.3.vsix
 ```
 
 Requires VS Code 1.141+. It uses the built-in `node:sqlite`, so there are no native dependencies. UI-click tests launch an isolated profile with a temporary loopback debugging port and stop only their owned processes (matching PID and creation time) on exit; those test scripts are excluded from the VSIX.
+
+Screenshot mode uses a disposable development copy with synthetic local stores and a fictional identity. It does not read your Copilot history or GitHub account. The test-only identity replacement is never included in a release.
 
 Keep older installed-version folders until VS Code has reloaded. Let VS Code's extension manager clean them up; manually deleting a version still cached by an open window breaks activation.
 

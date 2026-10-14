@@ -9,7 +9,8 @@ The approved public namespace for these projects is `apkola29`.
 2. Package with the official `@vscode/vsce` CLI, leaving its secret scan enabled.
 3. Inspect the archive file list and verify the compact tracker UI on the exact packaged VSIX.
 4. Do not include logs, session data, credential files, personal screenshots, local account/configuration
-   records, dependency folders, or local preview archives in commits.
+   records, dependency folders, or local preview archives in commits. Documentation screenshots must use
+   the isolated synthetic screenshot mode and contain no personal usage or account details.
 5. Keep preview status explicit for Agent Keep-Awake. Auto activity detection is unavailable.
 
 ## Package
@@ -20,7 +21,10 @@ From the repository root:
 New-Item -ItemType Directory -Force release-artifacts
 
 Set-Location extensions\ai-credits-usage-tracker
-npx --yes @vscode/vsce@4.0.0 package --no-dependencies --out ..\..\release-artifacts\ai-usage-credits-meter-0.4.2.vsix
+npx --yes @vscode/vsce@4.0.0 package --no-dependencies `
+  --baseContentUrl https://github.com/apkola29/vscode_extensions/blob/main/extensions/ai-credits-usage-tracker `
+  --baseImagesUrl https://github.com/apkola29/vscode_extensions/raw/main/extensions/ai-credits-usage-tracker `
+  --out ..\..\release-artifacts\ai-usage-credits-meter-0.4.3.vsix
 
 Set-Location ..\agent-keep-awake
 npx --yes @vscode/vsce@4.0.0 package --no-dependencies --pre-release --out ..\..\release-artifacts\agent-keep-awake-1.1.1-preview.vsix
@@ -57,7 +61,7 @@ An `Access Denied` response is a stop condition, not something to work around.
 After secure authorization succeeds:
 
 ```powershell
-npx --yes @vscode/vsce@4.0.0 publish --packagePath release-artifacts\ai-usage-credits-meter-0.4.2.vsix
+npx --yes @vscode/vsce@4.0.0 publish --packagePath release-artifacts\ai-usage-credits-meter-0.4.3.vsix
 ```
 
 For authorized Entra authentication, add `--azure-credential`.

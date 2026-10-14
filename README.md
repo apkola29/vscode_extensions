@@ -22,6 +22,20 @@ Marketplace listings:
 
 The stable extension IDs and project directories are retained for compatibility. Tracker usage is local/device-scoped, not an official account-wide GitHub bill. Keep-awake does not automatically detect Copilot activity or chat completion.
 
+## GH Copilot Usage Tracker preview
+
+Native VS Code screenshots using **synthetic usage and a fictional demo account**, not personal account data.
+
+**Hover for the cycle total and highest-credit models:**
+
+![GH Copilot Usage Tracker native hover with a synthetic usage total and five highest-credit models](extensions/ai-credits-usage-tracker/media/screenshots/usage-hover.png)
+
+**Click for a compact, dismissible model list:**
+
+![GH Copilot Usage Tracker compact popup with synthetic model credits and tokens, plus ranking, refresh and close buttons](extensions/ai-credits-usage-tracker/media/screenshots/usage-popup.png)
+
+See the [tracker README](extensions/ai-credits-usage-tracker/README.md#screenshots) for the status-bar indicator, screenshots, and usage instructions. These images illustrate the interface, not model availability or pricing.
+
 ## Repository structure
 
 ```text

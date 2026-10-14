@@ -13,6 +13,9 @@ const extensionId = `${manifest.publisher}.${manifest.name}`;
 const codeExe = process.env.VSCODE_EXE || path.join(process.env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code', 'Code.exe');
 const vsixIndex = process.argv.indexOf('--vsix');
 const vsix = vsixIndex >= 0 ? path.resolve(process.argv[vsixIndex + 1]) : undefined;
+const screenshotsIndex = process.argv.indexOf('--screenshots');
+const screenshotsDir = screenshotsIndex >= 0 ? path.resolve(process.argv[screenshotsIndex + 1]) : undefined;
+if (screenshotsDir && vsix) throw new Error('Screenshot demo mode is separate from exact-VSIX verification');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class Cdp {
@@ -110,6 +113,16 @@ async function main() {
   const extensionsDir = path.join(tmp, 'extensions');
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key === 'ELECTRON_RUN_AS_NODE' || key.startsWith('VSCODE_')) delete env[key];
+  let developmentPath = root;
+  if (screenshotsDir) {
+    const expected = path.join(root, 'media', 'screenshots');
+    if (screenshotsDir !== expected) throw new Error('Documentation screenshots must go in this project media/screenshots directory');
+    const demo = require('./screenshot-demo').prepareScreenshotDemo(tmp, root, userData);
+    developmentPath = demo.demoExtension;
+    env.COPILOT_HOME = demo.copilotHome;
+    env.CLAUDE_CONFIG_DIR = demo.claudeHome;
+    fs.mkdirSync(screenshotsDir, { recursive: true });
+  }
   if (vsix) {
     const quote = (s) => `"${s}"`;
     const install = [path.join(path.dirname(codeExe), 'bin', 'code.cmd'), '--user-data-dir', userData,
@@ -120,7 +133,7 @@ async function main() {
   const child = cp.spawn(codeExe, [
     `--user-data-dir=${userData}`,
     `--extensions-dir=${extensionsDir}`,
-    ...(!vsix ? [`--extensionDevelopmentPath=${root}`] : []),
+    ...(!vsix ? [`--extensionDevelopmentPath=${developmentPath}`] : []),
     `--remote-debugging-port=${port}`,
     '--remote-debugging-address=127.0.0.1',
     '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes',
@@ -150,6 +163,11 @@ async function main() {
     cdp = await Cdp.connect(page.webSocketDebuggerUrl);
     await cdp.send('Runtime.enable');
     await cdp.send('Page.enable');
+    if (screenshotsDir) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 1280, height: 800, deviceScaleFactor: 1.5, mobile: false,
+      });
+    }
     await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     await until(() => cdp.evaluate(`!!document.querySelector('.monaco-workbench')`), 60000, 'the workbench');
     const buttonExpression = `(() => {
@@ -174,6 +192,22 @@ async function main() {
         editorTabs: Array.from(document.querySelectorAll('.tabs-container .tab')).map(e => e.textContent) };
     })()`;
     const initialLayout = await cdp.evaluate(layoutExpression);
+    const capture = async (name, expression) => {
+      if (!screenshotsDir) return;
+      const clip = await cdp.evaluate(`(() => {
+        const element = ${expression};
+        if (!element) throw new Error('Screenshot element not found');
+        const r = element.getBoundingClientRect();
+        const x = Math.max(0, Math.floor(r.x));
+        const y = Math.max(0, Math.floor(r.y));
+        return { x, y, width: Math.min(innerWidth - x, Math.ceil(r.right) - x),
+          height: Math.min(innerHeight - y, Math.ceil(r.bottom) - y), scale: 1 };
+      })()`);
+      const image = await cdp.send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: false });
+      fs.writeFileSync(path.join(screenshotsDir, name), Buffer.from(image.data, 'base64'));
+    };
+    await capture('status-bar.png', `Array.from(document.querySelectorAll('.statusbar-item'))
+      .find(e => e.id.includes('aiUsageCreditsMeter.status') || e.id.includes(${JSON.stringify(extensionId)}))`);
     console.log('Hovering the native GitHub Copilot usage status item');
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: button.x, y: button.y });
     const hoverExpression = `(() => {
@@ -188,6 +222,15 @@ async function main() {
     assert.equal(hover.deviceScope, true);
     assert.ok(hover.topModels > 0 && hover.topModels <= 5);
     assert.ok(hover.height < 600);
+    if (screenshotsDir) {
+      const demoText = await cdp.evaluate(`Array.from(document.querySelectorAll('.monaco-hover'))
+        .find(e => e.textContent.includes(${JSON.stringify(TITLE)})).textContent`);
+      assert.ok(demoText.includes('demo-user'));
+      assert.ok(demoText.includes('2,500 credits'));
+      for (const { model } of require('./screenshot-demo').DEMO_MODELS) assert.ok(demoText.includes(model));
+    }
+    await capture('usage-hover.png', `Array.from(document.querySelectorAll('.monaco-hover'))
+      .find(e => e.textContent.includes(${JSON.stringify(TITLE)}))`);
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 80, y: 80 });
     await until(async () => !(await cdp.evaluate(hoverExpression)), 10000, 'hover dismissal when the pointer leaves');
     const click = async (coordinates) => {
@@ -214,6 +257,7 @@ async function main() {
     assert.ok(popup.height < 600);
     assert.ok(popup.creditRows > 0 && popup.creditRows <= 5);
     assert.ok(popup.close);
+    await capture('usage-popup.png', `document.querySelector('.quick-input-widget')`);
     assert.deepEqual(await cdp.evaluate(layoutExpression), initialLayout, 'Opening the popup must not reveal a panel or change editors');
     await click(popup.close);
     await until(async () => !(await cdp.evaluate(popupExpression)), 10000, 'close-button dismissal');

@@ -1,8 +1,11 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { aggregateUsage } = require('../lib/aggregate');
+const { DEMO_ACCOUNT, DEMO_MODELS, prepareScreenshotDemo } = require('./screenshot-demo');
 
 const project = path.resolve(__dirname, '..');
 const repository = path.resolve(project, '..', '..');
@@ -53,5 +56,74 @@ test('public overview pages do not link to missing local documentation or exclud
       assert.ok(fs.existsSync(target), `${file}: missing link target ${href}`);
       assert.doesNotMatch(href, /IMPLEMENTATION_PLAN|PROGRESS\.md|FEASIBILITY\.md/);
     }
+  }
+});
+
+test('documentation screenshots are bounded PNGs without text, account or EXIF metadata', () => {
+  const screenshots = path.join(project, 'media', 'screenshots');
+  const names = ['status-bar.png', 'usage-hover.png', 'usage-popup.png'];
+  assert.deepEqual(fs.readdirSync(screenshots).sort(), [...names].sort());
+  for (const name of names) {
+    const png = fs.readFileSync(path.join(screenshots, name));
+    assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    assert.ok(png.readUInt32BE(16) >= 100 && png.readUInt32BE(16) <= 2048);
+    assert.ok(png.readUInt32BE(20) >= 20 && png.readUInt32BE(20) <= 1200);
+    let offset = 8;
+    const chunks = [];
+    while (offset < png.length) {
+      assert.ok(offset + 12 <= png.length, `${name}: incomplete PNG chunk`);
+      const size = png.readUInt32BE(offset);
+      const type = png.toString('ascii', offset + 4, offset + 8);
+      assert.ok(['IHDR', 'IDAT', 'IEND', 'sRGB', 'gAMA', 'cHRM', 'pHYs'].includes(type),
+        `${name}: unexpected metadata chunk ${type}`);
+      assert.ok(offset + size + 12 <= png.length, `${name}: invalid PNG chunk size`);
+      chunks.push(type);
+      offset += size + 12;
+    }
+    assert.equal(chunks[0], 'IHDR');
+    assert.equal(chunks.at(-1), 'IEND');
+    assert.ok(chunks.includes('IDAT'));
+    assert.equal(offset, png.length);
+  }
+  for (const file of [path.join(repository, 'README.md'), path.join(project, 'README.md')]) {
+    const text = fs.readFileSync(file, 'utf8');
+    assert.match(text, /synthetic usage and a fictional demo account/);
+    for (const name of names.filter((n) => file === path.join(project, 'README.md') || n !== 'status-bar.png')) {
+      assert.match(text, new RegExp(`!\\[[^\\]]+\\]\\([^\\s)]+/${name.replace('.', '\\.')}\\)`));
+    }
+  }
+});
+
+test('screenshot fixtures read only isolated synthetic usage and never change the released identity module', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-screenshot-fixture-'));
+  const identityPath = path.join(project, 'lib', 'github-identity.js');
+  const productionIdentity = fs.readFileSync(identityPath, 'utf8');
+  try {
+    const userData = path.join(tmp, 'user-data');
+    const now = new Date('2026-10-14T12:00:00Z');
+    const demo = prepareScreenshotDemo(tmp, project, userData, now);
+    for (const directory of Object.values(demo)) {
+      assert.ok(!path.relative(tmp, directory).startsWith('..'));
+    }
+    const summary = await aggregateUsage({
+      now,
+      provider: 'githubCopilot',
+      copilotHome: demo.copilotHome,
+      vscodeUserDirs: [path.join(userData, 'User')],
+      claudeDirs: [demo.claudeHome],
+      sortBy: 'credits',
+    });
+    assert.deepEqual(summary.models.map((m) => m.model), DEMO_MODELS.map((m) => m.model));
+    assert.deepEqual(summary.models.map((m) => m.totalCredits), DEMO_MODELS.map((m) => m.credits));
+    assert.equal(summary.totals.totalCredits, 2500);
+    assert.equal(summary.diagnostics.cliRows, DEMO_MODELS.length);
+    assert.equal(summary.diagnostics.vscodeRequests, 0);
+    assert.deepEqual(summary.diagnostics.errors, []);
+    const identity = require(path.join(demo.demoExtension, 'lib', 'github-identity.js'));
+    assert.deepEqual(await identity.githubIdentity(), { status: 'signedIn', id: 'demo-account', label: DEMO_ACCOUNT });
+    await assert.rejects(identity.connectGitHub(), /disabled in screenshot-only demo mode/);
+    assert.equal(fs.readFileSync(identityPath, 'utf8'), productionIdentity);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

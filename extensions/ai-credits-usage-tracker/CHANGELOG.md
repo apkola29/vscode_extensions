@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Add native status-bar, hover and compact-popup screenshots to the Marketplace overview and repository introduction.
+- Use only synthetic usage and a fictional demo account in an isolated screenshot profile; no personal screenshots or histories are published.
+- Validate screenshot links, PNG metadata and demo-data isolation. Runtime behavior is unchanged.
+
 ## 0.4.2
 
 - Rename the visible extension, hover, popup, Command Palette categories and output channel to **GH Copilot Usage Tracker**.

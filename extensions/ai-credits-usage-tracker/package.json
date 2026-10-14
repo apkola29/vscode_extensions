@@ -2,7 +2,7 @@
   "name": "ai-usage-credits-meter",
   "displayName": "GH Copilot Usage Tracker",
   "description": "Track GitHub Copilot usage: local AI credits and tokens by model and monthly cycle, in a compact hover and popup. Independent community extension; not an account-wide billing report.",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "publisher": "apkola29",
   "author": "apkola29",
   "license": "MIT",
