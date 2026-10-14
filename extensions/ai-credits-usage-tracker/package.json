@@ -1,0 +1,164 @@
+{
+  "name": "ai-usage-credits-meter",
+  "displayName": "AI Credits Usage Tracker",
+  "description": "A compact hover summary and dismissible usage popup. Tracks local GitHub Copilot credits and tokens by model without opening a panel.",
+  "version": "0.4.1",
+  "publisher": "apkola29",
+  "author": "apkola29",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/apkola29/vscode_extensions.git",
+    "directory": "extensions/ai-credits-usage-tracker"
+  },
+  "homepage": "https://github.com/apkola29/vscode_extensions/tree/main/extensions/ai-credits-usage-tracker",
+  "bugs": {
+    "url": "https://github.com/apkola29/vscode_extensions/issues"
+  },
+  "engines": {
+    "vscode": "^1.141.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "credits",
+    "usage",
+    "tokens",
+    "copilot",
+    "claude",
+    "billing"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Local Copilot history is read only in a trusted VS Code window."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "The tracker requires local read-only usage stores."
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:aiUsageCreditsMeter.connectAccount",
+    "onCommand:aiUsageCreditsMeter.refresh",
+    "onCommand:aiUsageCreditsMeter.openDashboard",
+    "onCommand:aiUsageCreditsMeter.selectProvider",
+    "onCommand:aiUsageCreditsMeter.show",
+    "onCommand:aiUsageCreditsMeter.compute"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiUsageCreditsMeter.openDashboard",
+        "title": "Show Detailed Dashboard",
+        "category": "AI Credits Usage Tracker",
+        "icon": {
+          "light": "./media/credits-tracker-light.svg",
+          "dark": "./media/credits-tracker-dark.svg"
+        }
+      },
+      {
+        "command": "aiUsageCreditsMeter.connectAccount",
+        "title": "Use My GitHub Account",
+        "category": "AI Credits Usage Tracker",
+        "icon": "$(github)"
+      },
+      {
+        "command": "aiUsageCreditsMeter.refresh",
+        "title": "Refresh Usage",
+        "category": "AI Credits Usage Tracker",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiUsageCreditsMeter.selectProvider",
+        "title": "Select Chat Provider",
+        "category": "AI Credits Usage Tracker",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "aiUsageCreditsMeter.show",
+        "title": "Show Compact Usage Popup",
+        "category": "AI Credits Usage Tracker",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "aiUsageCreditsMeter.compute",
+        "title": "Compute Credits Usage (JSON)",
+        "category": "AI Credits Usage Tracker"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "aiUsageCreditsMeter.compute",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI Credits Usage Tracker",
+      "properties": {
+        "aiUsageCreditsMeter.provider": {
+          "type": "string",
+          "enum": [
+            "githubCopilot",
+            "claudeCode"
+          ],
+          "enumItemLabels": [
+            "GitHub Copilot",
+            "Claude Code (preview)"
+          ],
+          "enumDescriptions": [
+            "Read GitHub Copilot Chat, agent-host, SDK and CLI usage from local Copilot stores.",
+            "Read Claude Code transcript usage from local Claude configuration directories."
+          ],
+          "default": "githubCopilot",
+          "scope": "machine",
+          "description": "Chat provider whose local usage data is shown. GitHub Copilot is the supported default."
+        },
+        "aiUsageCreditsMeter.sortBy": {
+          "type": "string",
+          "enum": [
+            "tokens",
+            "credits"
+          ],
+          "default": "tokens",
+          "description": "Rank models by total tokens or by AI credits."
+        },
+        "aiUsageCreditsMeter.cycleResetDay": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 28,
+          "description": "UTC day of month on which the billing cycle resets (GitHub Copilot resets on the 1st)."
+        },
+        "aiUsageCreditsMeter.claudeConfigDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "description": "Claude Code config directories used only when the provider is Claude Code. Empty = CLAUDE_CONFIG_DIR, or ~/.config/claude and ~/.claude."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/aggregate.test.js test/github-identity.test.js test/worker-client.test.js test/compact-ui.test.js test/release.test.js",
+    "test:toolbar": "node test/toolbar.js",
+    "test:popup": "node test/toolbar.js",
+    "test:vscode": "node test/run.js",
+    "usage": "node scripts/cli.js",
+    "package": "node scripts/package.js",
+    "package:vsce": "npx --yes @vscode/vsce@4.0.0 package --no-dependencies"
+  }
+}

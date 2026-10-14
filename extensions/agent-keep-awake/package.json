@@ -1,0 +1,144 @@
+{
+  "name": "agent-keep-awake",
+  "displayName": "Agent Keep-Awake",
+  "description": "One coffee icon to keep your computer awake for long agent runs: Off, or Keep awake until you turn it off. Auto - Copilot activity is unavailable in this preview.",
+  "version": "1.1.0",
+  "publisher": "apkola29",
+  "author": "apkola29",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#16213E",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/apkola29/vscode_extensions.git",
+    "directory": "extensions/agent-keep-awake"
+  },
+  "bugs": {
+    "url": "https://github.com/apkola29/vscode_extensions/issues"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "sleep",
+    "keep awake",
+    "no sleep",
+    "caffeine",
+    "caffeinate",
+    "insomnia",
+    "agent",
+    "copilot",
+    "claude",
+    "power"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Keep awake and Off use a fixed local power request, so they work in Restricted Mode. Auto - Copilot activity is unavailable in this build and would also require a trusted local workspace."
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentKeepAwake.selectMode",
+        "title": "Choose Mode (Off, Keep Awake or Auto)",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.keepAwake",
+        "title": "Keep Awake Until Turned Off",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.autoMode",
+        "title": "Auto - Copilot Activity (Unavailable)",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.turnOff",
+        "title": "Turn Off (Allow Sleep)",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.toggleSession",
+        "title": "Start or Stop Timed Session (Duration Setting)",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.chooseDuration",
+        "title": "Choose Duration for a Timed Session",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.openSettings",
+        "title": "Configure Duration (Hours)",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.stopSession",
+        "title": "Stop Timed Session (Same as Turn Off)",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.showStatus",
+        "title": "Show Status",
+        "category": "Agent Keep-Awake"
+      },
+      {
+        "command": "agentKeepAwake.showLog",
+        "title": "Show Log",
+        "category": "Agent Keep-Awake"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Keep-Awake",
+      "properties": {
+        "agentKeepAwake.durationHours": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 24,
+          "scope": "application",
+          "order": 1,
+          "markdownDescription": "Duration, in hours, for the explicit timed command (**Agent Keep-Awake: Start or Stop Timed Session**). Use **0** for until you turn it off or close/reload this VS Code window. Use **0.5** for 30 minutes, **1** for 1 hour, **2** for 2 hours, and so on (up to 24). Changes apply to the next timed session only and never alter an active hold. The main Keep awake choice always lasts until you turn it off and ignores this setting. This setting never turns Keep Awake on automatically."
+        },
+        "agentKeepAwake.showStatusBarItem": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "order": 2,
+          "markdownDescription": "Show the coffee control in the status bar: click it to choose Off, Keep awake or Auto. Green means a confirmed hold. Hiding the control never turns off an active hold; use **Agent Keep-Awake: Turn Off (Allow Sleep)** from the Command Palette."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test --test-timeout=5000 \"test/unit/*.test.js\"",
+    "test:os": "node test/os/verify-os.js",
+    "test:integration": "node test/integration/runTest.js",
+    "test:all": "npm run typecheck && npm test && npm run test:os && npm run test:integration",
+    "package": "npx --yes @vscode/vsce@latest package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.95.0",
+    "@vscode/test-electron": "^3.1.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,145 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { UsageWorkerClient } = require('../lib/worker-client');
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+class TestWorker extends EventEmitter {
+  constructor() {
+    super();
+    this.messages = [];
+    this.terminations = 0;
+  }
+  postMessage(message) { this.messages.push(message); }
+  async terminate() { this.terminations += 1; this.emit('exit', 0); return 0; }
+  reply(result) { this.emit('message', { id: this.messages[this.messages.length - 1].id, result }); }
+}
+
+function client(opts = {}) {
+  const workers = [];
+  const service = new UsageWorkerClient('internal-worker-path', {
+    timeoutMs: 1000,
+    idleMs: 1000,
+    createWorker: () => { const worker = new TestWorker(); workers.push(worker); return worker; },
+    ...opts,
+  });
+  return { service, workers };
+}
+
+test('repeated identical scans share one worker request', async () => {
+  const { service, workers } = client();
+  const a = service.run({ provider: 'githubCopilot' });
+  const b = service.run({ provider: 'githubCopilot' });
+  await tick();
+  assert.equal(workers.length, 1);
+  assert.equal(workers[0].messages.length, 1);
+  workers[0].reply({ models: [] });
+  assert.deepEqual(await a, await b);
+  assert.equal(service.pending.size, 0);
+  await service.dispose();
+  assert.equal(workers[0].terminations, 1);
+});
+
+test('timeouts terminate the stalled worker and a retry gets a new worker', async () => {
+  const { service, workers } = client({ timeoutMs: 20 });
+  await assert.rejects(service.run({ provider: 'githubCopilot' }), /Timed out/);
+  await service.stopping;
+  assert.equal(workers[0].terminations, 1);
+  assert.equal(service.pending.size, 0);
+  const next = service.run({ provider: 'githubCopilot' });
+  await tick();
+  assert.equal(workers.length, 2);
+  workers[1].reply({ recovered: true });
+  assert.deepEqual(await next, { recovered: true });
+  await service.dispose();
+});
+
+test('the request queue is bounded and deactivation cancels pending work', async () => {
+  const { service, workers } = client({ maxPending: 2 });
+  const a = service.run({ sortBy: 'credits' });
+  const b = service.run({ sortBy: 'tokens' });
+  const rejectedA = assert.rejects(a, /deactivated/);
+  const rejectedB = assert.rejects(b, /deactivated/);
+  await tick();
+  await assert.rejects(service.run({ sortBy: 'third' }), /Too many/);
+  await service.dispose();
+  await Promise.all([rejectedA, rejectedB]);
+  assert.equal(workers.length, 1);
+  assert.equal(workers[0].terminations, 1);
+  assert.equal(service.pending.size, 0);
+  await assert.rejects(service.run({}), /disposed/);
+});
+
+test('idle workers are stopped rather than retaining their cache indefinitely', async () => {
+  const { service, workers } = client({ idleMs: 15 });
+  const request = service.run({});
+  await tick();
+  workers[0].reply({ models: [] });
+  await request;
+  await sleep(60);
+  await service.stopping;
+  assert.equal(workers[0].terminations, 1);
+  assert.equal(service.worker, undefined);
+  await service.dispose();
+});
+
+test('worker errors and old exit events cannot cancel a replacement worker', async () => {
+  const { service, workers } = client();
+  const failed = service.run({});
+  const rejection = assert.rejects(failed, /fixture worker failed/);
+  await tick();
+  workers[0].emit('error', new Error('fixture worker failed'));
+  await rejection;
+  await service.stopping;
+  const next = service.run({});
+  await tick();
+  workers[0].emit('exit', 1);
+  workers[1].reply({ models: ['ok'] });
+  assert.deepEqual(await next, { models: ['ok'] });
+  await service.dispose();
+});
+
+test('a worker cleanup failure blocks further scans and is explicitly reported', async () => {
+  const errors = [];
+  const { service, workers } = client({ onError: (e) => errors.push(e.message) });
+  const request = service.run({});
+  await tick();
+  workers[0].reply({ models: [] });
+  await request;
+  workers[0].terminate = async () => { throw new Error('fixture cleanup failure'); };
+  await service.stop();
+  assert.deepEqual(errors, ['fixture cleanup failure']);
+  await assert.rejects(service.run({}), /cleanup failed/);
+  await service.dispose();
+});
+
+test('the real worker has bounded memory and releases its thread after idle', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-real-worker-'));
+  const service = new UsageWorkerClient(path.join(__dirname, '..', 'lib', 'worker.js'), {
+    idleMs: 25, timeoutMs: 5000,
+  });
+  try {
+    const result = await service.run({
+      provider: 'githubCopilot', copilotHome: path.join(root, 'empty'), vscodeUserDirs: [],
+    });
+    assert.deepEqual(result.models, []);
+    const worker = service.worker;
+    assert.ok(worker.threadId > 0);
+    assert.equal(worker.resourceLimits.maxOldGenerationSizeMb, 512);
+    assert.equal(worker.resourceLimits.maxYoungGenerationSizeMb, 32);
+    await sleep(150);
+    await service.stopping;
+    assert.equal(worker.threadId, -1);
+    assert.equal(service.worker, undefined);
+    assert.equal(service.pending.size, 0);
+  } finally {
+    await service.dispose();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

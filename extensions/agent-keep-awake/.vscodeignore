@@ -1,0 +1,15 @@
+.github/**
+.vscode/**
+.vscode-test/**
+docs/**
+node_modules/**
+test/**
+src/chat.js
+IMPLEMENTATION_PLAN.md
+*.vsix
+*.bundle
+tsconfig.json
+package-lock.json
+.gitignore
+.editorconfig
+**/*.map

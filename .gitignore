@@ -1,0 +1,30 @@
+# Build/install artifacts, never public source
+**/node_modules/
+**/.vscode-test/
+**/.vscode/
+release-artifacts/
+*.vsix
+*.bundle
+*.log
+*.db
+*.db-*
+*.jsonl
+coverage/
+
+# Credentials, editor/session state, local-only notes
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+**/.copilot/
+**/.claude/
+**/session-state/
+**/IMPLEMENTATION_PLAN.md
+**/PROGRESS.md
+**/FEASIBILITY.md
+
+# OS metadata
+.DS_Store
+Thumbs.db
