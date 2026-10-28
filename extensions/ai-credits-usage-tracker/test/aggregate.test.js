@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('node:crypto');
 const { aggregateUsage, billingCycle, replayChatSession, normalizeClaudeModel, normalizeModel, claudePrice } = require('../lib/aggregate');
 
 const NOW = new Date('2026-10-15T00:00:00Z');
@@ -1017,6 +1018,66 @@ test('unreadable Claude Code folders are reported once, by error code, without n
     const r = await claudeOnly(fx);
     assert.deepEqual(Array.from(r.diagnostics.errors), ['Claude Code transcripts folder could not be read (EPERM)']);
     assert.equal(r.totals.calls, 1, 'readable folders are still counted');
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: a short id that looks like a digest never merges with the long id it resembles', async () => {
+  const long = 'x'.repeat(200);
+  const lookalike = `sha256:${crypto.createHash('sha256').update(long).digest('hex')}`;
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: long, request: 'r' }), claudeLine({ id: lookalike, request: 'r' })] });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.calls, 2);
+    assert.equal(r.diagnostics.claudeDuplicates, 0);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: the record size limit excludes the line ending, for LF and CRLF alike', async () => {
+  const limit = 8 * 1024 * 1024;
+  const sized = (id, bytes) => {
+    const probe = claudeLine({ id, content: '' });
+    return claudeLine({ id, content: 'a'.repeat(bytes - Buffer.byteLength(probe)) });
+  };
+  assert.equal(Buffer.byteLength(sized('probe', limit)), limit);
+  const fx = claudeFixture({});
+  try {
+    const file = path.join(fx.claude, 'projects', 'p', 'edge.jsonl');
+    fs.writeFileSync(file, [
+      `${sized('exact-lf', limit)}\n`, `${sized('exact-crlf', limit)}\r\n`,
+      `${sized('over-lf', limit + 1)}\n`, `${sized('over-crlf', limit + 1)}\r\n`,
+      `${claudeLine({ id: 'after' })}\n`,
+    ].join(''));
+    touch(file);
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.calls, 3, 'the two records exactly at the limit and the small record after them are counted');
+    assert.equal(r.diagnostics.claudeOversizedRecords, 2, 'only the two records one byte over the limit are skipped');
+    assert.deepEqual(r.diagnostics.errors, []);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('a chat session whose responder is Claude is not taken for GitHub Copilot by an agent-host marker alone', async () => {
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'm1', session: 'claude-session' })] });
+  try {
+    const userDir = path.join(fx.root, 'Code', 'User');
+    const base = { timestamp: Date.parse('2026-10-05T00:00:00Z'), promptTokens: 100, completionTokens: 10, copilotCredits: 7 };
+    const session = (sessionId, responderUsername, request) => JSON.stringify({ kind: 0, v: { sessionId, responderUsername, requests: [{ ...base, ...request }] } });
+    writeChat(userDir, 'w', 'copilot-agent.jsonl', session('copilot-agent', 'GitHub Copilot', { modelId: 'agent-model', modelTotals: [] }));
+    writeChat(userDir, 'w', 'claude-agent.jsonl', session('claude-session', 'Claude Code', { timestamp: base.timestamp + 1, modelId: 'agent-model', modelTotals: [] }));
+    writeChat(userDir, 'w', 'copilot-model.jsonl', session('copilot-model', 'Claude Code', { timestamp: base.timestamp + 2, modelId: 'copilot/claude-x' }));
+    const r = await aggregateUsage({
+      now: NOW, provider: 'both', copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [userDir], claudeDirs: [fx.claude],
+    });
+    assert.equal(r.githubCopilot.totals.calls, 2, 'the Copilot responder and the explicit copilot/ model id are counted');
+    assert.equal(r.githubCopilot.totals.totalCredits, 14);
+    assert.equal(r.githubCopilot.diagnostics.vscodeOtherProviderSessions, 1, 'the Claude responder session is left out');
+    assert.equal(r.claudeCode.totals.calls, 1, 'its Claude Code transcript is not suppressed as a Copilot session');
+    assert.equal(r.claudeCode.diagnostics.claudeSkippedCopilotSessions, 0);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }

@@ -64,7 +64,19 @@ class UsageWorkerClient {
     const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
     const timer = setTimeout(() => this.stop(new Error('Timed out reading provider usage; the worker was stopped'), true), this.timeoutMs);
     this.pending.set(id, { key, promise, resolve, reject, timer });
-    try { worker.postMessage({ id, opts }); } catch (error) { this.stop(error); }
+    try {
+      worker.postMessage({ id, opts });
+    } catch (error) {
+      if (error && error.name === 'DataCloneError') {
+        // Only this request's own options could not be serialized: the worker and the scans already running are fine.
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(error);
+        if (this.pending.size === 0) this.scheduleIdle();
+      } else {
+        this.stop(error);
+      }
+    }
     return promise;
   }
 

@@ -93,6 +93,59 @@ test('an explicit stop gives every pending request the reason it was given', asy
   await service.dispose();
 });
 
+test('a request that cannot be serialized fails alone; the running scan and its worker are unaffected', async () => {
+  const workers = [];
+  class CloneWorker extends TestWorker {
+    postMessage(message) {
+      if (message.opts.bad) throw Object.assign(new Error('value could not be cloned'), { name: 'DataCloneError' });
+      if (message.opts.broken) throw new Error('worker channel closed');
+      super.postMessage(message);
+    }
+  }
+  const service = new UsageWorkerClient('internal-worker-path', {
+    timeoutMs: 1000,
+    idleMs: 1000,
+    createWorker: () => { const worker = new CloneWorker(); workers.push(worker); return worker; },
+  });
+  const healthy = service.run({ sortBy: 'credits' });
+  const bad = service.run({ bad: true });
+  await assert.rejects(bad, /could not be cloned/);
+  assert.equal(service.pending.size, 1, 'only the request that could not be sent was removed');
+  assert.equal(workers.length, 1, 'the worker was not replaced');
+  assert.equal(workers[0].terminations, 0);
+  workers[0].reply({ credits: 3 });
+  assert.deepEqual(await healthy, { credits: 3 });
+  await assert.rejects(service.run({ bad: true }), /could not be cloned/);
+  assert.equal(service.pending.size, 0, 'a failed send leaves nothing pending');
+
+  // Any other send failure means the channel itself is suspect, so everything pending fails and the worker is replaced.
+  const running = service.run({ sortBy: 'tokens' }).catch((error) => error);
+  await tick();
+  const broken = service.run({ broken: true }).catch((error) => error);
+  const [first, second] = await Promise.all([running, broken]);
+  assert.match(first.message, /channel closed|cancelled|deactivated/);
+  assert.match(second.message, /channel closed/);
+  await service.stopping;
+  assert.equal(service.pending.size, 0);
+  await service.dispose();
+});
+
+test('a request holding a value that cannot be cloned fails alone on the real worker', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-real-worker-clone-'));
+  const service = new UsageWorkerClient(path.join(__dirname, '..', 'lib', 'worker.js'), { idleMs: 1000, timeoutMs: 10000 });
+  try {
+    const options = { provider: 'githubCopilot', copilotHome: path.join(root, 'empty'), vscodeUserDirs: [] };
+    const healthy = service.run(options);
+    const bad = service.run({ ...options, copilotHome: path.join(root, 'other'), unclonable: () => {} });
+    await assert.rejects(bad, (error) => error.name === 'DataCloneError');
+    assert.deepEqual((await healthy).models, [], 'the scan already running still completes');
+    assert.equal(service.pending.size, 0);
+  } finally {
+    await service.dispose();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the request queue is bounded and deactivation cancels pending work', async () => {
   const { service, workers } = client({ maxPending: 2 });
   const a = service.run({ sortBy: 'credits' });

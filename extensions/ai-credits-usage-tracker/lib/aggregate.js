@@ -458,6 +458,9 @@ function chatSessionFiles(userDir, diag) {
 async function summarizeChatSession(file) {
   const session = file.endsWith('.jsonl') ? await replayChatSessionFile(file) : JSON.parse(fs.readFileSync(file, 'utf8'));
   const requests = session && Array.isArray(session.requests) ? session.requests : [];
+  // A session whose responder names Claude or Anthropic is not GitHub Copilot, so an agent-host marker alone is not
+  // taken as proof of Copilot there; a `copilot/` model id or the Copilot responder still is.
+  const foreignResponder = !!session && typeof session.responderUsername === 'string' && /claude|anthropic/i.test(session.responderUsername);
   let invalidNumbers = 0;
   const number = (value) => {
     const n = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
@@ -478,7 +481,7 @@ async function summarizeChatSession(file) {
         effectiveTimestamp: Number.isFinite(r.responseTimestamp) ? r.responseTimestamp : r.timestamp,
         model: r.modelId || ((r.result && r.result.metadata) || {}).resolvedModel,
         githubCopilot: /^copilot\//i.test(String(r.modelId || ''))
-          || Array.isArray(r.modelTotals)
+          || (!foreignResponder && Array.isArray(r.modelTotals))
           || (session && session.responderUsername === 'GitHub Copilot'),
         promptTokens: number(r.promptTokens), // final-round context size: a lower bound on billed input
         completionTokens: number(r.completionTokens),
@@ -639,16 +642,23 @@ const boundedNumber = (value, max) => {
   return Number.isFinite(n) && n >= 0 && n <= max ? n : 0;
 };
 
-// Streams newline-delimited records, never holding more than maxBytes of one record. Longer records are
-// discarded as they stream by. Returns the number of records skipped for size.
+// Streams newline-delimited records, never holding more than maxBytes of one record (plus the CR of a CRLF line
+// ending, which is not part of the record). Longer records are discarded as they stream by. Returns the number of
+// records skipped for size.
 async function readBoundedRecords(file, maxBytes, onRecord) {
   let parts = [];
   let size = 0;
   let skipping = false;
   let oversized = 0;
   const finish = () => {
-    if (skipping) oversized += 1;
-    else if (size > 0) onRecord(Buffer.concat(parts, size));
+    if (skipping) {
+      oversized += 1;
+    } else if (size > 0) {
+      const record = Buffer.concat(parts, size);
+      const payload = record[size - 1] === 13 ? size - 1 : size;
+      if (payload > maxBytes) oversized += 1;
+      else onRecord(record);
+    }
     parts = [];
     size = 0;
     skipping = false;
@@ -659,7 +669,7 @@ async function readBoundedRecords(file, maxBytes, onRecord) {
       const newline = chunk.indexOf(10, start);
       const end = newline === -1 ? chunk.length : newline;
       if (!skipping) {
-        if (size + (end - start) > maxBytes) {
+        if (size + (end - start) > maxBytes + 1) {
           skipping = true;
           parts = [];
           size = 0;
@@ -688,10 +698,11 @@ const preferClaudeEntry = (entry, previous, entryTime = 0, previousTime = 0) => 
   return entryTime >= previousTime;
 };
 // Identifiers become dedupe keys. Long ones are hashed rather than truncated so two distinct ids never collide,
-// while the cached key stays small.
+// while the cached key stays small. The two forms are tagged so a short id that looks like a digest can never
+// equal a hashed long one.
 const identity = (value) => {
   const text = String(value);
-  return text.length <= MAX_MODEL_ID_LENGTH ? text : `sha256:${crypto.createHash('sha256').update(text).digest('hex')}`;
+  return text.length <= MAX_MODEL_ID_LENGTH ? `raw:${text}` : `sha256:${crypto.createHash('sha256').update(text).digest('hex')}`;
 };
 
 async function readClaudeTranscript(file) {
