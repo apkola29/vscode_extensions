@@ -24,7 +24,7 @@ Set-Location extensions\ai-credits-usage-tracker
 npx --yes @vscode/vsce@4.0.0 package --no-dependencies `
   --baseContentUrl https://github.com/apkola29/vscode_extensions/blob/main/extensions/ai-credits-usage-tracker `
   --baseImagesUrl https://github.com/apkola29/vscode_extensions/raw/main/extensions/ai-credits-usage-tracker `
-  --out ..\..\release-artifacts\ai-usage-credits-meter-0.4.3.vsix
+  --out ..\..\release-artifacts\ai-usage-credits-meter-0.5.0.vsix
 
 Set-Location ..\agent-keep-awake
 npx --yes @vscode/vsce@4.0.0 package --no-dependencies --pre-release --out ..\..\release-artifacts\agent-keep-awake-1.1.1-preview.vsix
@@ -61,7 +61,7 @@ An `Access Denied` response is a stop condition, not something to work around.
 After secure authorization succeeds:
 
 ```powershell
-npx --yes @vscode/vsce@4.0.0 publish --packagePath release-artifacts\ai-usage-credits-meter-0.4.3.vsix
+npx --yes @vscode/vsce@4.0.0 publish --packagePath release-artifacts\ai-usage-credits-meter-0.5.0.vsix
 ```
 
 For authorized Entra authentication, add `--azure-credential`.

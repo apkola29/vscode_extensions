@@ -17,5 +17,5 @@ vulnerability-reporting feature when available; never post a credential to obtai
   or passed as literal command-line arguments.
 - GitHub Actions workflows have read-only repository permissions and do not publish automatically.
 
-Local usage formats may change with VS Code/Copilot releases. This project cannot guarantee that future
+Local usage formats may change with VS Code, Copilot and Claude Code releases. This project cannot guarantee that future
 upstream versions will remain compatible; regression tests and visible partial-data reporting are the safeguards.

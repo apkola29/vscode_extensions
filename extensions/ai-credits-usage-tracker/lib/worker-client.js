@@ -35,10 +35,10 @@ class UsageWorkerClient {
       if (this.pending.size === 0) this.scheduleIdle();
     });
     worker.on('error', (error) => {
-      if (this.worker === worker) this.stop(error);
+      if (this.worker === worker) this.stop(error, true);
     });
     worker.on('exit', (code) => {
-      if (this.worker === worker) this.stop(new Error(`Usage worker stopped unexpectedly (${code})`));
+      if (this.worker === worker) this.stop(new Error(`Usage worker stopped unexpectedly (${code})`), true);
     });
     return worker;
   }
@@ -62,20 +62,25 @@ class UsageWorkerClient {
     let resolve;
     let reject;
     const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
-    const timer = setTimeout(() => this.stop(new Error('Timed out reading provider usage; the worker was stopped')), this.timeoutMs);
+    const timer = setTimeout(() => this.stop(new Error('Timed out reading provider usage; the worker was stopped'), true), this.timeoutMs);
     this.pending.set(id, { key, promise, resolve, reject, timer });
     try { worker.postMessage({ id, opts }); } catch (error) { this.stop(error); }
     return promise;
   }
 
-  stop(error = new Error('Usage scan was cancelled')) {
+  // The worker handles requests one at a time in arrival order, so after a timeout or crash only the oldest request
+  // was being processed. With `blameOldestOnly` the requests queued behind it never started: they are cancelled
+  // instead of inheriting a failure they did not cause, and their callers can run them again on a fresh worker.
+  stop(error = new Error('Usage scan was cancelled'), blameOldestOnly = false) {
     clearTimeout(this.idleTimer);
     this.idleTimer = undefined;
     const worker = this.worker;
     this.worker = undefined;
+    let oldest = true;
     for (const request of this.pending.values()) {
       clearTimeout(request.timer);
-      request.reject(error);
+      request.reject(blameOldestOnly && !oldest ? new Error('Usage scan was cancelled') : error);
+      oldest = false;
     }
     this.pending.clear();
     if (worker) {

@@ -12,6 +12,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('node:crypto');
 const readline = require('readline');
 
 // total_nano_aiu / 1e9 = GitHub AI Credits (1 credit = $0.01 under the 2026-06-01 usage-based billing model).
@@ -29,31 +30,47 @@ function billingCycle(now = new Date(), resetDay = 1) {
 }
 
 const nonNegativeNumber = (value) => {
+  if (typeof value !== 'number' && typeof value !== 'string') return 0;
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 };
-const normalizeModel = (m) => typeof m === 'string' && m.trim()
-  ? m.trim().replace(/^copilot\//i, '').toLowerCase()
-  : 'unknown';
+// Model names come from files on disk and are shown in the UI and printed to terminals, so control characters and
+// bidirectional formatting characters are removed.
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const normalizeModel = (m) => {
+  const text = typeof m === 'string' ? m.slice(0, 128).replace(CONTROL_CHARS, '').trim() : '';
+  return text ? text.replace(/^copilot\//i, '').toLowerCase() : 'unknown';
+};
+// Error messages can embed absolute paths and folder names (Claude Code names a project folder after its working
+// directory), so read problems are reported by error code only.
+const errorCode = (e) => {
+  const code = e && (typeof e.code === 'string' ? e.code : e.name);
+  return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(code) ? code : 'Error';
+};
+const addError = (diag, message) => { if (!diag.errors.includes(message)) diag.errors.push(message); };
 const inWindow = (ms, win) => Number.isFinite(ms) && ms >= win.start.getTime() && ms < win.end.getTime();
 const zero = () => Object.fromEntries(METRICS.map((k) => [k, 0]));
 
 // Parsed-file cache for the lifetime of the process (the extension keeps one worker alive), reused while a
-// file's size and mtime are unchanged. Entries not touched by the latest run are pruned.
+// file's size and mtime are unchanged. Entries not touched by the latest run are pruned. When the cache is full
+// it keeps what it has rather than evicting: scans walk the same files in the same order, so evicting the oldest
+// entry would make every file miss on every scan as soon as the total exceeds the limit.
 const fileCache = new Map();
 const MAX_CACHED_FILES = 256;
+const cacheStats = { hits: 0, misses: 0 };
 let runId = 0;
 async function cachedParse(file, st, parse) {
   const hit = fileCache.get(file);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
     hit.runId = runId;
-    fileCache.delete(file);
-    fileCache.set(file, hit);
+    cacheStats.hits += 1;
     return hit.value;
   }
+  cacheStats.misses += 1;
   const value = await parse();
-  fileCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, value, runId });
-  while (fileCache.size > MAX_CACHED_FILES) fileCache.delete(fileCache.keys().next().value);
+  if (fileCache.has(file) || fileCache.size < MAX_CACHED_FILES) {
+    fileCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, value, runId });
+  }
   return value;
 }
 function pruneCache() {
@@ -421,7 +438,7 @@ async function replayChatSessionFile(file) {
 
 function listDir(dir, diag, label) {
   try { return fs.readdirSync(dir); } catch (e) {
-    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') diag.errors.push(`${label} ${dir}: ${e.message}`);
+    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') addError(diag, `${label} could not be read (${errorCode(e)})`);
     return [];
   }
 }
@@ -443,7 +460,7 @@ async function summarizeChatSession(file) {
   const requests = session && Array.isArray(session.requests) ? session.requests : [];
   let invalidNumbers = 0;
   const number = (value) => {
-    const n = Number(value);
+    const n = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
     if (Number.isFinite(n) && n >= 0) return n;
     if (value !== undefined && value !== null) invalidNumbers += 1;
     return 0;
@@ -471,7 +488,7 @@ async function summarizeChatSession(file) {
   };
 }
 
-async function readVSCodeChat(userDirs, win, totals, diag, coveredCliSessionIds) {
+async function readVSCodeChat(userDirs, win, totals, diag, coveredCliSessionIds, copilotSessionIds = new Set()) {
   // Shared across all user dirs (not reset per dir) so a session copied between Code and Code - Insiders, or
   // forked within the same store, is only ever counted once.
   const seenSessions = new Set();
@@ -504,6 +521,9 @@ async function readVSCodeChat(userDirs, win, totals, diag, coveredCliSessionIds)
     }
   }
   const signature = (r) => `${r.effectiveTimestamp}|${r.promptTokens}|${r.completionTokens}|${r.copilotCredits}`;
+  // Sessions positively identified as Copilot are reported to the caller so a Claude Code transcript with the same
+  // session id is never listed again as separate Claude Code usage.
+  for (const { sessionId } of summaries) copilotSessionIds.add(sessionId);
   // Build this before counting anything: a fork can be newer and therefore encountered before the covered
   // original. Covered signatures make suppression independent of file order and rewritten session IDs.
   const coveredAgentHostRequests = new Set();
@@ -538,126 +558,243 @@ async function readVSCodeChat(userDirs, win, totals, diag, coveredCliSessionIds)
 }
 
 // ---------- Source 4: Claude Code transcripts ----------
-// Anthropic list prices, USD per 1M tokens. Opus 4.7–5, Opus 5.5 and Sonnet 5 were checked against GitHub
-// AI-credit billing for the same models and match to the cent; Claude Code usage is shown at these rates.
+// Anthropic list prices, USD per 1M tokens (https://platform.claude.com/docs/en/about-claude/pricing). Opus 4.7–5,
+// Opus 5.5 and Sonnet 5 were also checked against GitHub AI-credit billing for the same models and match to the
+// cent. Claude Code usage is shown at these standard rates; fast mode, US data residency and other surcharges are
+// not recorded in transcripts and are not modelled. Haiku 5.5 has higher rates for prompts over 100,000 tokens.
 const CLAUDE_PRICES = [
+  [/^claude-(?:fable|mythos)-5\.1(?![\d])/, { input: 10, output: 50, cacheRead: 0.25, cacheWrite5m: 12.5, cacheWrite1h: 20 }],
+  [/^claude-(?:fable|mythos)-5(?![.\d])/, { input: 10, output: 50, cacheRead: 1, cacheWrite5m: 12.5, cacheWrite1h: 20 }],
   [/^claude-opus-5\.5(?![.\d])/, { input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 }],
   [/^claude-opus-(4\.[5-9]|5)(?![.\d])/, { input: 5, output: 25, cacheRead: 0.5, cacheWrite5m: 6.25, cacheWrite1h: 10 }],
   [/^claude-opus-(4|4\.[01]|3)(?![.\d])/, { input: 15, output: 75, cacheRead: 1.5, cacheWrite5m: 18.75, cacheWrite1h: 30 }],
   [/^claude-sonnet-5\.5(?![.\d])/, { input: 2, output: 10, cacheRead: 0.1, cacheWrite5m: 2.5, cacheWrite1h: 4 }],
   [/^claude-sonnet-5(?![.\d])/, { input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 }],
   [/^claude-sonnet-(4|3\.5|3\.7)(?![\d])/, { input: 3, output: 15, cacheRead: 0.3, cacheWrite5m: 3.75, cacheWrite1h: 6 }],
+  [/^claude-haiku-5\.5(?![\d])/, {
+    input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.2,
+    longPrompt: { above: 100000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite5m: 0.625, cacheWrite1h: 1 },
+  }],
   [/^claude-haiku-4(?![\d])/, { input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 }],
   [/^claude-haiku-3\.5(?![\d])/, { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite5m: 1, cacheWrite1h: 1.6 }],
   [/^claude-haiku-3(?![.\d])/, { input: 0.25, output: 1.25, cacheRead: 0.03, cacheWrite5m: 0.3, cacheWrite1h: 0.5 }],
 ];
 const claudePrice = (model) => (CLAUDE_PRICES.find(([re]) => re.test(model)) || [])[1] || null;
+// The rates for one message: models with a long-prompt tier switch when the whole prompt (input + cached) is larger.
+const claudeRates = (price, entry) => (price.longPrompt && entry.input + entry.cacheRead + entry.cacheWrite > price.longPrompt.above
+  ? price.longPrompt : price);
 
 // Anthropic / Bedrock / Vertex ids -> the dotted form Copilot uses, so the same model shares one row
 // (claude-opus-4-8-20260301 -> claude-opus-4.8, claude-3-5-haiku-20241022 -> claude-haiku-3.5).
+// Ids are capped first: they come from files on disk and must never make the regexes below expensive.
+const MAX_MODEL_ID_LENGTH = 128;
 function normalizeClaudeModel(id) {
-  let m = String(id || '').toLowerCase().trim()
-    .replace(/^(?:[a-z]{2,4}\.)?anthropic[./]/, '')
-    .replace(/\[[^\]]*\]$/, '')
+  let m = String(id || '').slice(0, MAX_MODEL_ID_LENGTH).replace(CONTROL_CHARS, '').toLowerCase().trim()
+    .replace(/^(?:[a-z]{2,8}\.)?anthropic[./]/, '')
+    .replace(/\[[^[\]]*\]$/, '')
     .replace(/@\d{8}$/, '')
     .replace(/-v\d+(?::\d+)?$/, '')
     .replace(/-(?:latest|\d{8})$/, '');
   let x;
-  if ((x = m.match(/^claude-(opus|sonnet|haiku)-(\d+)-(\d+)$/))) m = `claude-${x[1]}-${x[2]}.${x[3]}`;
+  if ((x = m.match(/^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)-(\d+)$/))) m = `claude-${x[1]}-${x[2]}.${x[3]}`;
   else if ((x = m.match(/^claude-(\d+)-(\d+)-(opus|sonnet|haiku)$/))) m = `claude-${x[3]}-${x[1]}.${x[2]}`;
   else if ((x = m.match(/^claude-(\d+)-(opus|sonnet|haiku)$/))) m = `claude-${x[2]}-${x[1]}`;
   return m;
 }
 
+// CLAUDE_CONFIG_DIR is one directory (its path may legitimately contain commas); several locations can be listed
+// in the aiUsageCreditsMeter.claudeConfigDirs setting instead.
 function defaultClaudeDirs() {
   const env = process.env.CLAUDE_CONFIG_DIR;
-  if (env) return env.split(',').map((s) => s.trim()).filter(Boolean);
+  if (env && env.trim()) return [env.trim()];
   return [path.join(os.homedir(), '.config', 'claude'), path.join(os.homedir(), '.claude')];
 }
+
+// Claude Code keeps large tool outputs and MCP task state next to a session's transcript. They are not transcripts.
+const CLAUDE_NON_TRANSCRIPT_DIRS = new Set(['tool-results', 'mcp-tasks']);
 
 function listJsonl(dir, out = [], diag) {
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
-    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') diag.errors.push(`Claude Code projects ${dir}: ${e.message}`);
+    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') addError(diag, `Claude Code transcripts folder could not be read (${errorCode(e)})`);
     return out;
   }
   for (const e of entries) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) listJsonl(p, out, diag);
-    else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
+    if (e.isDirectory()) {
+      if (!CLAUDE_NON_TRANSCRIPT_DIRS.has(e.name)) listJsonl(p, out, diag);
+    } else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
   }
   return out;
 }
 
-async function readClaudeTranscript(file) {
-  const entries = [];
-  const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
-  for await (const line of rl) {
-    if (!line.includes('"usage"')) continue;
-    let o;
-    try { o = JSON.parse(line); } catch { continue; }
-    const msg = o && o.message;
-    const u = msg && msg.usage;
-    if (!u || typeof u !== 'object' || o.isApiErrorMessage || (o.type && o.type !== 'assistant')) continue;
-    if (typeof msg.model !== 'string' || !msg.model.trim() || msg.model === '<synthetic>') continue;
-    const cacheWrite = nonNegativeNumber(u.cache_creation_input_tokens);
-    const cacheWrite1h = Math.min(cacheWrite, nonNegativeNumber(u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens));
-    entries.push({
-      key: msg.id ? `${msg.id}:${o.requestId || ''}` : null,
-      ts: Date.parse(o.timestamp),
-      sessionId: typeof o.sessionId === 'string' ? o.sessionId : null,
-      model: msg.model,
-      input: nonNegativeNumber(u.input_tokens),
-      output: nonNegativeNumber(u.output_tokens),
-      cacheRead: nonNegativeNumber(u.cache_read_input_tokens),
-      cacheWrite,
-      cacheWrite1h,
-      costUSD: Number.isFinite(o.costUSD) ? o.costUSD : null,
-    });
+// A single transcript record larger than this is skipped (and counted) instead of being buffered: assistant
+// messages are bounded by the model's output limit, while huge tool-result records could otherwise exhaust memory.
+const MAX_CLAUDE_RECORD_BYTES = 8 * 1024 * 1024;
+const MAX_CLAUDE_TOKENS = 1e12;
+const MAX_CLAUDE_COST_USD = 1e6;
+const boundedNumber = (value, max) => {
+  if (typeof value !== 'number' && typeof value !== 'string') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= max ? n : 0;
+};
+
+// Streams newline-delimited records, never holding more than maxBytes of one record. Longer records are
+// discarded as they stream by. Returns the number of records skipped for size.
+async function readBoundedRecords(file, maxBytes, onRecord) {
+  let parts = [];
+  let size = 0;
+  let skipping = false;
+  let oversized = 0;
+  const finish = () => {
+    if (skipping) oversized += 1;
+    else if (size > 0) onRecord(Buffer.concat(parts, size));
+    parts = [];
+    size = 0;
+    skipping = false;
+  };
+  for await (const chunk of fs.createReadStream(file)) {
+    let start = 0;
+    while (start < chunk.length) {
+      const newline = chunk.indexOf(10, start);
+      const end = newline === -1 ? chunk.length : newline;
+      if (!skipping) {
+        if (size + (end - start) > maxBytes) {
+          skipping = true;
+          parts = [];
+          size = 0;
+        } else if (end > start) {
+          parts.push(chunk.subarray(start, end));
+          size += end - start;
+        }
+      }
+      if (newline === -1) break;
+      finish();
+      start = newline + 1;
+    }
   }
-  return entries;
+  if (skipping || size > 0) finish();
+  return oversized;
+}
+
+const claudeSize = (x) => x.input + x.output + x.cacheRead + x.cacheWrite;
+// Streaming writes several lines per message with growing usage, so the larger record is the complete one. On a
+// tie a recorded cost is never dropped, and otherwise the record from the more recently written file (the later
+// line within one file) wins, since usage can be reclassified without growing and a superseded copy is older.
+const preferClaudeEntry = (entry, previous, entryTime = 0, previousTime = 0) => {
+  const [a, b] = [claudeSize(entry), claudeSize(previous)];
+  if (a !== b) return a > b;
+  if ((entry.costUSD !== null) !== (previous.costUSD !== null)) return entry.costUSD !== null;
+  return entryTime >= previousTime;
+};
+// Identifiers become dedupe keys. Long ones are hashed rather than truncated so two distinct ids never collide,
+// while the cached key stays small.
+const identity = (value) => {
+  const text = String(value);
+  return text.length <= MAX_MODEL_ID_LENGTH ? text : `sha256:${crypto.createHash('sha256').update(text).digest('hex')}`;
+};
+
+async function readClaudeTranscript(file) {
+  const keyed = new Map();
+  let duplicates = 0;
+  const oversized = await readBoundedRecords(file, MAX_CLAUDE_RECORD_BYTES, (record) => {
+    if (!record.includes('"usage"')) return;
+    // One malformed record must never discard the valid records around it.
+    try {
+      const o = JSON.parse(record.toString('utf8'));
+      const msg = o && o.message;
+      const u = msg && msg.usage;
+      if (!u || typeof u !== 'object' || o.isApiErrorMessage || (o.type && o.type !== 'assistant')) return;
+      if (typeof msg.model !== 'string' || !msg.model.trim() || msg.model === '<synthetic>') return;
+      // Text kept for display and matching is capped: it comes from files on disk and is held in the cache.
+      const clip = (value) => String(value).slice(0, MAX_MODEL_ID_LENGTH);
+      const cacheWrite = boundedNumber(u.cache_creation_input_tokens, MAX_CLAUDE_TOKENS);
+      const entry = {
+        ts: typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN,
+        sessionId: typeof o.sessionId === 'string' ? clip(o.sessionId) : null,
+        model: clip(msg.model),
+        input: boundedNumber(u.input_tokens, MAX_CLAUDE_TOKENS),
+        output: boundedNumber(u.output_tokens, MAX_CLAUDE_TOKENS),
+        cacheRead: boundedNumber(u.cache_read_input_tokens, MAX_CLAUDE_TOKENS),
+        cacheWrite,
+        cacheWrite1h: Math.min(cacheWrite, boundedNumber(u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens, MAX_CLAUDE_TOKENS)),
+        costUSD: Number.isFinite(o.costUSD) && o.costUSD >= 0 && o.costUSD <= MAX_CLAUDE_COST_USD ? o.costUSD : null,
+      };
+      const requestId = typeof o.requestId === 'string' ? identity(o.requestId) : '';
+      // Messages normally carry an id; without one, an identical session/request/time/model/usage tuple is the same message.
+      entry.key = typeof msg.id === 'string' && msg.id
+        ? JSON.stringify(['id', identity(msg.id), requestId])
+        : JSON.stringify(['fingerprint', entry.sessionId, requestId, entry.ts, entry.model, entry.input, entry.output, entry.cacheRead, entry.cacheWrite]);
+      const previous = keyed.get(entry.key);
+      if (previous) duplicates += 1;
+      if (!previous || preferClaudeEntry(entry, previous)) keyed.set(entry.key, entry);
+    } catch { /* skip this record only */ }
+  });
+  // Compacted per file (one entry per message) so the cached value stays small for long streamed sessions.
+  return { entries: [...keyed.values()], duplicates, oversized };
 }
 
 async function readClaudeCode(dirs, win, totals, diag, copilotSessionIds) {
+  // Paths are only case-insensitive on Windows and macOS, so only fold case there.
+  const foldCase = process.platform === 'win32' || process.platform === 'darwin';
+  const pathKey = (p) => (foldCase ? p.toLowerCase() : p);
   const seenDirs = new Set();
+  const seenFiles = new Set();
   // Streaming writes several lines per assistant message and resumed sessions copy earlier messages into a new
   // file, so each message (id + requestId) is counted once, keeping its most complete usage.
   const best = new Map();
-  const unkeyed = [];
+  let oversized = 0;
   for (const dir of dirs) {
     const projects = path.resolve(dir, 'projects');
-    if (seenDirs.has(projects.toLowerCase()) || !fs.existsSync(projects)) continue;
-    seenDirs.add(projects.toLowerCase());
-    for (const f of listJsonl(projects, [], diag)) {
+    if (!fs.existsSync(projects)) continue;
+    // A directory reached through a link or junction is the same directory, so compare resolved locations.
+    let resolved = projects;
+    try { resolved = fs.realpathSync(projects); } catch { /* keep the configured location */ }
+    if (seenDirs.has(pathKey(resolved))) continue;
+    seenDirs.add(pathKey(resolved));
+    // Overlapping configured roots must not list the same transcript twice.
+    const transcripts = listJsonl(projects, [], diag).filter((f) => {
+      const key = pathKey(f);
+      if (seenFiles.has(key)) return false;
+      seenFiles.add(key);
+      return true;
+    });
+    diag.claudeTranscripts += transcripts.length;
+    for (const f of transcripts) {
       let st;
       try { st = fs.statSync(f); } catch { continue; }
       if (st.mtimeMs < win.start.getTime()) continue;
       try {
-        const entries = await cachedParse(f, st, () => readClaudeTranscript(f));
+        const parsed = await cachedParse(f, st, () => readClaudeTranscript(f));
         diag.claudeFiles += 1;
-        for (const e of entries) {
+        diag.claudeDuplicates += parsed.duplicates;
+        oversized += parsed.oversized;
+        for (const e of parsed.entries) {
           if (!inWindow(e.ts, win)) continue;
           if (e.sessionId && copilotSessionIds.has(e.sessionId)) { diag.claudeSkippedCopilotSessions += 1; continue; }
-          if (!e.key) { unkeyed.push(e); continue; }
           const prev = best.get(e.key);
-          const size = (x) => x.input + x.output + x.cacheRead + x.cacheWrite;
           if (prev) diag.claudeDuplicates += 1;
-          if (!prev || size(e) > size(prev)) best.set(e.key, e);
+          if (!prev || preferClaudeEntry(e, prev.entry, st.mtimeMs, prev.mtime)) best.set(e.key, { entry: e, mtime: st.mtimeMs });
         }
       } catch (err) {
-        diag.errors.push(`claude transcript ${path.basename(f)}: ${err.message}`);
+        addError(diag, `claude transcript ${path.basename(f)}: ${errorCode(err)}`);
       }
     }
   }
+  if (oversized) {
+    diag.claudeOversizedRecords += oversized;
+    diag.notes.push(`${oversized} oversized Claude Code transcript record(s) were skipped`);
+  }
   const unpriced = new Set();
-  for (const e of [...best.values(), ...unkeyed]) {
+  for (const { entry: e } of best.values()) {
     const model = normalizeClaudeModel(e.model);
     const p = claudePrice(model);
     let credits = 0;
     if (e.costUSD !== null && e.costUSD > 0) credits = e.costUSD * 100;
     else if (p) {
-      credits = (e.input * p.input + e.cacheRead * p.cacheRead + (e.cacheWrite - e.cacheWrite1h) * p.cacheWrite5m
-        + e.cacheWrite1h * p.cacheWrite1h + e.output * p.output) / 1e6 * 100;
+      const rates = claudeRates(p, e);
+      credits = (e.input * rates.input + e.cacheRead * rates.cacheRead + (e.cacheWrite - e.cacheWrite1h) * rates.cacheWrite5m
+        + e.cacheWrite1h * rates.cacheWrite1h + e.output * rates.output) / 1e6 * 100;
     } else unpriced.add(model);
     totals.addExact(model, {
       calls: 1,
@@ -670,31 +807,77 @@ async function readClaudeCode(dirs, win, totals, diag, copilotSessionIds) {
     diag.claudeMessages += 1;
     diag.claudeCredits += credits;
   }
-  if (unpriced.size) diag.notes.push(`no list price for: ${[...unpriced].join(', ')} (tokens counted, credits 0)`);
+  if (unpriced.size) diag.notes.push(`no list price for: ${[...unpriced].join(', ')} (tokens counted, value unavailable)`);
 }
 
+const PROVIDER_IDS = ['githubCopilot', 'claudeCode', 'both'];
+
+const newDiagnostics = () => ({
+  cliRows: 0, sessionDirsScanned: 0, backfilledSessions: 0, straddlingRuns: 0, reconciledSessions: 0, pendingCalls: 0,
+  cliSessionCredits: 0, estimatedCredits: 0, vscodeSessionFiles: 0, vscodeDuplicateFiles: 0, vscodeDuplicateRequests: 0,
+  vscodeInvalidNumbers: 0, vscodeOtherProviderSessions: 0, vscodeRequests: 0,
+  vscodeCredits: 0, vscodeAgentHostSkipped: 0, claudeFiles: 0, claudeTranscripts: 0, claudeMessages: 0, claudeDuplicates: 0,
+  claudeOversizedRecords: 0, cacheHits: 0, cacheMisses: 0,
+  claudeSkippedCopilotSessions: 0, claudeCredits: 0, notes: [], errors: [], timings: {},
+});
+
+function summarize(provider, win, sortBy, totals, diag) {
+  const models = [...totals.byModel.values()]
+    .map(({ cliCalls, cliCredits, cliTokens, ...b }) => ({
+      ...b,
+      sources: [...b.sources].sort(),
+      exactTokens: b.inputTokens + b.outputTokens,
+      totalTokens: b.inputTokens + b.outputTokens + b.estTokens,
+      totalCredits: b.credits + b.estCredits,
+    }))
+    .sort((a, b) => (sortBy === 'credits' ? b.totalCredits - a.totalCredits : b.totalTokens - a.totalTokens) || b.pendingCalls - a.pendingCalls);
+  const sum = (k) => models.reduce((s, m) => s + m[k], 0);
+  const byTool = {};
+  for (const m of models) for (const [tool, c] of Object.entries(m.byTool)) byTool[tool] = (byTool[tool] || 0) + c;
+  return {
+    provider,
+    cycle: { start: win.start.toISOString(), end: win.end.toISOString() },
+    sortBy,
+    models,
+    totals: {
+      totalTokens: sum('totalTokens'), exactTokens: sum('exactTokens'), estTokens: sum('estTokens'),
+      inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
+      totalCredits: sum('totalCredits'), exactCredits: sum('credits'), estCredits: sum('estCredits'),
+      premiumRequests: sum('premiumRequests'), calls: sum('calls'), pendingCalls: sum('pendingCalls'),
+      byTool,
+    },
+    diagnostics: diag,
+  };
+}
+
+// provider 'both' returns { githubCopilot, claudeCode } summaries that are never merged: Copilot credits are billed
+// AI credits, while Claude Code values are list-price estimates from local transcripts. The Claude pass still skips
+// transcripts for sessions Copilot already recorded, so the same usage is not listed in both sections.
 async function aggregateUsage(opts = {}) {
-  if (opts.provider !== undefined && opts.provider !== 'githubCopilot' && opts.provider !== 'claudeCode') {
+  if (opts.provider !== undefined && !PROVIDER_IDS.includes(opts.provider)) {
     throw new Error('Unsupported chat provider');
   }
   const t0 = Date.now();
   runId += 1;
+  const cacheBase = { ...cacheStats };
   const win = billingCycle(opts.now || new Date(), opts.resetDay || 1);
-  const provider = opts.provider === 'claudeCode' ? 'claudeCode' : opts.provider === 'githubCopilot' ? 'githubCopilot' : null;
-  const includeGitHubCopilot = provider ? provider === 'githubCopilot' : opts.includeGitHubCopilot !== false;
-  const includeClaudeCode = provider ? provider === 'claudeCode' : opts.includeClaudeCode !== false;
+  // The two sources are never merged into one total. A call that names no provider gets both, as separate sections,
+  // unless it explicitly excludes one of them.
+  const requested = opts.provider !== undefined ? opts.provider
+    : opts.includeClaudeCode === false ? 'githubCopilot'
+      : opts.includeGitHubCopilot === false ? 'claudeCode' : 'both';
+  const both = requested === 'both';
+  const provider = both ? null : requested;
+  const includeGitHubCopilot = both || provider === 'githubCopilot';
+  const includeClaudeCode = both || provider === 'claudeCode';
   const copilotHome = opts.copilotHome || process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot');
   const userDirs = opts.vscodeUserDirs || defaultVSCodeUserDirs();
   const claudeDirs = includeClaudeCode ? (opts.claudeDirs && opts.claudeDirs.length ? opts.claudeDirs : defaultClaudeDirs()) : [];
   const totals = new Totals();
   const sessions = new Map();
-  const diag = {
-    cliRows: 0, sessionDirsScanned: 0, backfilledSessions: 0, straddlingRuns: 0, reconciledSessions: 0, pendingCalls: 0,
-    cliSessionCredits: 0, estimatedCredits: 0, vscodeSessionFiles: 0, vscodeDuplicateFiles: 0, vscodeDuplicateRequests: 0,
-    vscodeInvalidNumbers: 0, vscodeOtherProviderSessions: 0, vscodeRequests: 0,
-    vscodeCredits: 0, vscodeAgentHostSkipped: 0, claudeFiles: 0, claudeMessages: 0, claudeDuplicates: 0,
-    claudeSkippedCopilotSessions: 0, claudeCredits: 0, notes: [], errors: [], timings: {},
-  };
+  const diag = newDiagnostics();
+  const claudeTotals = both ? new Totals() : totals;
+  const claudeDiag = both ? newDiagnostics() : diag;
 
   // Each source is isolated so one unreadable store cannot discard the others.
   let indexed = new Map();
@@ -716,47 +899,39 @@ async function aggregateUsage(opts = {}) {
   const coveredCliSessionIds = new Set([...sessions]
     .filter(([, sess]) => sess.exact.size > 0 || sess.points.some((p) => inWindow(p.ts, win)))
     .map(([id]) => id));
+  const vscodeSessionIds = new Set();
   if (includeGitHubCopilot) {
-    try { await readVSCodeChat(userDirs, win, totals, diag, coveredCliSessionIds); } catch (e) { diag.errors.push(`vscode chat: ${e.message}`); }
+    try { await readVSCodeChat(userDirs, win, totals, diag, coveredCliSessionIds, vscodeSessionIds); } catch (e) { diag.errors.push(`vscode chat: ${e.message}`); }
   }
   diag.timings.vscodeMs = Date.now() - ts; ts = Date.now();
   if (includeClaudeCode) {
-    try { await readClaudeCode(claudeDirs, win, totals, diag, new Set([...sessions.keys(), ...indexed.keys()])); } catch (e) { diag.errors.push(`claude code: ${e.message}`); }
+    try {
+      await readClaudeCode(claudeDirs, win, claudeTotals, claudeDiag, new Set([...sessions.keys(), ...indexed.keys(), ...vscodeSessionIds]));
+    } catch (e) { claudeDiag.errors.push(`claude code: ${e.message}`); }
   }
   diag.timings.claudeMs = Date.now() - ts; ts = Date.now();
   if (includeGitHubCopilot) reconcileSessions(sessions, win, totals, diag);
   diag.timings.reconcileMs = Date.now() - ts;
   pruneCache();
   diag.cachedFiles = fileCache.size;
+  diag.cacheHits = cacheStats.hits - cacheBase.hits;
+  diag.cacheMisses = cacheStats.misses - cacheBase.misses;
 
   const sortBy = opts.sortBy === 'credits' ? 'credits' : 'tokens';
-  const models = [...totals.byModel.values()]
-    .map(({ cliCalls, cliCredits, cliTokens, ...b }) => ({
-      ...b,
-      sources: [...b.sources].sort(),
-      exactTokens: b.inputTokens + b.outputTokens,
-      totalTokens: b.inputTokens + b.outputTokens + b.estTokens,
-      totalCredits: b.credits + b.estCredits,
-    }))
-    .sort((a, b) => (sortBy === 'credits' ? b.totalCredits - a.totalCredits : b.totalTokens - a.totalTokens) || b.pendingCalls - a.pendingCalls);
-  const sum = (k) => models.reduce((s, m) => s + m[k], 0);
-  const byTool = {};
-  for (const m of models) for (const [tool, c] of Object.entries(m.byTool)) byTool[tool] = (byTool[tool] || 0) + c;
-  diag.elapsedMs = Date.now() - t0;
-  return {
-    provider: provider || (includeGitHubCopilot && includeClaudeCode ? 'all' : includeClaudeCode ? 'claudeCode' : 'githubCopilot'),
-    cycle: { start: win.start.toISOString(), end: win.end.toISOString() },
-    sortBy,
-    models,
-    totals: {
-      totalTokens: sum('totalTokens'), exactTokens: sum('exactTokens'), estTokens: sum('estTokens'),
-      inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
-      totalCredits: sum('totalCredits'), exactCredits: sum('credits'), estCredits: sum('estCredits'),
-      premiumRequests: sum('premiumRequests'), calls: sum('calls'), pendingCalls: sum('pendingCalls'),
-      byTool,
-    },
-    diagnostics: diag,
-  };
+  const elapsedMs = Date.now() - t0;
+  diag.elapsedMs = elapsedMs;
+  if (both) {
+    claudeDiag.elapsedMs = elapsedMs;
+    claudeDiag.cachedFiles = fileCache.size;
+    return {
+      provider: 'both',
+      cycle: { start: win.start.toISOString(), end: win.end.toISOString() },
+      sortBy,
+      githubCopilot: summarize('githubCopilot', win, sortBy, totals, diag),
+      claudeCode: summarize('claudeCode', win, sortBy, claudeTotals, claudeDiag),
+    };
+  }
+  return summarize(provider, win, sortBy, totals, diag);
 }
 
 module.exports = { aggregateUsage, billingCycle, normalizeModel, normalizeClaudeModel, claudePrice, replayChatSession };

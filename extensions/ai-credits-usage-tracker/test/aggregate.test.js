@@ -5,17 +5,26 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { aggregateUsage, billingCycle, replayChatSession, normalizeClaudeModel, claudePrice } = require('../lib/aggregate');
+const { aggregateUsage, billingCycle, replayChatSession, normalizeClaudeModel, normalizeModel, claudePrice } = require('../lib/aggregate');
 
 const NOW = new Date('2026-10-15T00:00:00Z');
 const nano = (credits) => credits * 1e9;
 const ev = (type, timestamp, data) => JSON.stringify({ type, timestamp, id: Math.random().toString(36).slice(2), data });
 const metrics = (calls, inputTokens, outputTokens, credits) => ({ requests: { count: calls, cost: calls }, usage: { inputTokens, outputTokens }, totalNanoAiu: nano(credits) });
 
+// Fixture files get a fixed in-cycle mtime so the tests do not depend on the host clock (files older than the
+// billing-cycle start are skipped by design).
+function touch(file, when = NOW) {
+  fs.utimesSync(file, when, when);
+  return file;
+}
+
 function writeSession(home, id, lines) {
   const dir = path.join(home, 'session-state', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'events.jsonl'), lines.join('\n') + '\n');
+  const file = path.join(dir, 'events.jsonl');
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+  touch(file);
 }
 
 function writeChat(userDir, ws, name, content, mtime) {
@@ -33,7 +42,7 @@ function writeChat(userDir, ws, name, content, mtime) {
     } catch { return line; }
   }).join('\n');
   fs.writeFileSync(f, tagged);
-  if (mtime) fs.utimesSync(f, mtime, mtime);
+  touch(f, mtime || NOW);
 }
 
 function fixture() {
@@ -229,7 +238,7 @@ test('Claude model ids normalize to the Copilot form and map to list prices', ()
   assert.equal(claudePrice('claude-sonnet-5.5').cacheRead, 0.1);
 });
 
-test('Claude Code transcripts: dedupe, pricing, filtering, and merge with Copilot rows', async () => {
+test('Claude Code transcripts: dedupe, pricing, filtering, and separate sections next to Copilot rows', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-fixture-claude-'));
   try {
     const home = path.join(root, '.copilot');
@@ -261,7 +270,8 @@ test('Claude Code transcripts: dedupe, pricing, filtering, and merge with Copilo
     fs.writeFileSync(path.join(proj, 'sess1', 'subagents', 'agent-1.jsonl'),
       asst('m8', 'r8', 'claude-haiku-4-5-20251001', { input_tokens: 1000, output_tokens: 100 }, '2026-10-07T00:00:00.000Z') + '\n');
 
-    const r = await aggregateUsage({ now: NOW, copilotHome: home, vscodeUserDirs: [], claudeDirs: [path.join(root, 'claude')] });
+    const both = await aggregateUsage({ now: NOW, provider: 'both', copilotHome: home, vscodeUserDirs: [], claudeDirs: [path.join(root, 'claude')] });
+    const r = both.claudeCode;
     const byModel = Object.fromEntries(r.models.map((m) => [m.model, m]));
     const close = (a, b) => Math.abs(a - b) < 1e-9;
     assert.deepEqual(r.diagnostics.errors, []);
@@ -272,16 +282,23 @@ test('Claude Code transcripts: dedupe, pricing, filtering, and merge with Copilo
     assert.equal(byModel['<synthetic>'], undefined);
 
     const opus = byModel['claude-opus-4.8'];
-    assert.equal(opus.calls, 2, 'one Copilot call + one deduplicated Claude message');
-    assert.equal(opus.inputTokens, 50 + 1300);
-    assert.equal(opus.outputTokens, 5 + 10, 'keeps the complete streamed usage, not the partial line');
-    assert.ok(close(opus.byTool['Copilot agent / CLI'], 3));
+    assert.equal(opus.calls, 1, 'one deduplicated Claude message; the Copilot call stays in the Copilot section');
+    assert.equal(opus.inputTokens, 1300);
+    assert.equal(opus.outputTokens, 10, 'keeps the complete streamed usage, not the partial line');
+    assert.equal(opus.byTool['Copilot agent / CLI'], undefined);
     assert.ok(close(opus.byTool['Claude Code'], 0.25), '$5/$25, cache read $0.50, 5m write $6.25');
     assert.ok(close(byModel['claude-sonnet-5'].credits, 0.055), '1h cache writes at $4/M');
     assert.ok(close(byModel['claude-opus-4.1'].credits, 50), 'costUSD wins when present');
     assert.ok(close(byModel['claude-haiku-4.5'].credits, 0.15), 'subagent transcripts are included');
     assert.ok(close(r.totals.byTool['Claude Code'], 50.455));
-    assert.ok(close(r.totals.byTool['Copilot agent / CLI'], 3));
+    assert.equal(r.totals.byTool['Copilot agent / CLI'], undefined);
+
+    const copilotOpus = both.githubCopilot.models.find((m) => m.model === 'claude-opus-4.8');
+    assert.equal(copilotOpus.calls, 1);
+    assert.equal(copilotOpus.inputTokens, 50);
+    assert.equal(copilotOpus.byTool['Claude Code'], undefined);
+    assert.ok(close(both.githubCopilot.totals.byTool['Copilot agent / CLI'], 3));
+    assert.equal(both.githubCopilot.totals.byTool['Claude Code'], undefined);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -563,8 +580,475 @@ test('the parsed-file cache is bounded even with many usage sessions', async () 
     const result = await aggregateUsage({
       now: NOW, provider: 'githubCopilot', copilotHome: path.join(root, '.copilot'), vscodeUserDirs: [userDir],
     });
-    assert.equal(result.diagnostics.cachedFiles, 256);
+    assert.ok(result.diagnostics.cachedFiles <= 256, 'the cache never exceeds its limit');
+    assert.ok(result.diagnostics.cachedFiles >= 240, 'the cache is still used up to its limit');
+    const again = await aggregateUsage({
+      now: NOW, provider: 'githubCopilot', copilotHome: path.join(root, '.copilot'), vscodeUserDirs: [userDir],
+    });
+    assert.ok(again.diagnostics.cacheHits >= 240, 'a full cache keeps its files instead of re-reading every file each scan');
+    assert.ok(again.diagnostics.cachedFiles <= 256);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('provider "both" returns separate Copilot and Claude Code sections without merging or double counting', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-fixture-both-'));
+  try {
+    const home = path.join(root, '.copilot');
+    writeSession(home, 'E', [
+      ev('assistant.message', '2026-10-06T00:00:00.000Z', { model: 'claude-opus-4.8' }),
+      ev('session.shutdown', '2026-10-06T00:01:00.000Z', { totalNanoAiu: nano(3), modelMetrics: { 'claude-opus-4.8': metrics(1, 50, 5, 3) } }),
+    ]);
+    const project = path.join(root, 'claude', 'projects', 'demo-project');
+    fs.mkdirSync(project, { recursive: true });
+    const message = (id, sessionId, timestamp) => JSON.stringify({
+      type: 'assistant', timestamp, sessionId, requestId: `req-${id}`,
+      message: {
+        id, model: 'claude-opus-4-8-20260301', role: 'assistant',
+        usage: {
+          input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200,
+          cache_creation: { ephemeral_5m_input_tokens: 200, ephemeral_1h_input_tokens: 0 },
+        },
+      },
+    });
+    fs.writeFileSync(path.join(project, 'claude-session.jsonl'), [
+      message('own', 'claude-session', '2026-10-07T00:00:00.000Z'),
+      message('copilot-owned', 'E', '2026-10-06T00:00:30.000Z'),
+      message('previous-cycle', 'claude-session', '2026-09-20T00:00:00.000Z'),
+      'not json {',
+    ].join('\n') + '\n');
+    // Claude Code keeps superseded copies of a transcript; their messages must not be counted twice.
+    fs.writeFileSync(path.join(project, 'claude-session.orphaned-1760000000-ab12.jsonl'),
+      message('own', 'claude-session', '2026-10-07T00:00:00.000Z') + '\n');
+
+    const r = await aggregateUsage({ now: NOW, provider: 'both', copilotHome: home, vscodeUserDirs: [], claudeDirs: [path.join(root, 'claude')] });
+    assert.equal(r.provider, 'both');
+    assert.equal(r.githubCopilot.provider, 'githubCopilot');
+    assert.equal(r.claudeCode.provider, 'claudeCode');
+
+    const copilot = r.githubCopilot.models.find((m) => m.model === 'claude-opus-4.8');
+    assert.equal(copilot.calls, 1);
+    assert.equal(copilot.credits, 3);
+    assert.equal(copilot.byTool['Claude Code'], undefined, 'Copilot usage of a Claude model stays in the Copilot section');
+    assert.equal(r.githubCopilot.diagnostics.claudeTranscripts, 0);
+    assert.equal(r.githubCopilot.totals.byTool['Claude Code'], undefined);
+
+    assert.deepEqual(r.claudeCode.models.map((m) => m.model), ['claude-opus-4.8']);
+    const claude = r.claudeCode.models[0];
+    assert.equal(claude.calls, 1, 'one message: duplicates, Copilot-owned and previous-cycle messages are excluded');
+    assert.equal(claude.totalTokens, 1310);
+    assert.ok(Math.abs(claude.totalCredits - 0.25) < 1e-9);
+    assert.equal(claude.byTool['Copilot agent / CLI'], undefined);
+    assert.equal(r.claudeCode.diagnostics.claudeTranscripts, 2);
+    assert.equal(r.claudeCode.diagnostics.claudeDuplicates, 1);
+    assert.equal(r.claudeCode.diagnostics.claudeSkippedCopilotSessions, 1);
+    assert.equal(r.claudeCode.diagnostics.cliRows, 0);
+    assert.deepEqual(r.claudeCode.diagnostics.errors, []);
+    assert.equal(r.cycle.start, r.githubCopilot.cycle.start);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('provider "both" reports no Claude Code transcripts when none exist and leaves Copilot usage intact', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-fixture-no-claude-'));
+  try {
+    const home = path.join(root, '.copilot');
+    writeSession(home, 'copilot-session', [
+      ev('assistant.message', '2026-10-05T00:00:00.000Z', { model: 'copilot-model' }),
+      ev('session.shutdown', '2026-10-05T00:01:00.000Z', {
+        totalNanoAiu: nano(4), modelMetrics: { 'copilot-model': metrics(1, 100, 10, 4) },
+      }),
+    ]);
+    fs.mkdirSync(path.join(root, 'empty-claude', 'projects'), { recursive: true });
+    for (const claudeDirs of [[path.join(root, 'missing-claude')], [path.join(root, 'empty-claude')]]) {
+      const r = await aggregateUsage({ now: NOW, provider: 'both', copilotHome: home, vscodeUserDirs: [], claudeDirs });
+      assert.equal(r.claudeCode.diagnostics.claudeTranscripts, 0);
+      assert.deepEqual(r.claudeCode.models, []);
+      assert.deepEqual(r.claudeCode.diagnostics.errors, []);
+      assert.deepEqual(r.githubCopilot.models.map((m) => m.model), ['copilot-model']);
+      assert.equal(r.githubCopilot.totals.totalCredits, 4);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---- Claude Code transcript hardening (adversarial review round) ----
+const claudeUsage = {
+  input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200,
+  cache_creation: { ephemeral_5m_input_tokens: 200, ephemeral_1h_input_tokens: 0 },
+};
+const claudeLine = ({ id = null, request = id === null ? null : `req-${id}`, session = 'claude-session', at = '2026-10-07T00:00:00.000Z',
+  model = 'claude-opus-4-8-20260301', usage = claudeUsage, content, ...extra }) => JSON.stringify({
+  type: 'assistant', timestamp: at, sessionId: session, ...(request === null ? {} : { requestId: request }),
+  message: { ...(id === null ? {} : { id }), model, role: 'assistant', ...(content === undefined ? {} : { content }), usage }, ...extra,
+});
+function claudeFixture(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-fixture-claude-edge-'));
+  const project = path.join(root, 'claude', 'projects', 'p');
+  fs.mkdirSync(project, { recursive: true });
+  for (const [name, lines] of Object.entries(files)) {
+    const file = path.join(project, name);
+    fs.writeFileSync(file, `${lines.join('\n')}\n`);
+    touch(file);
+  }
+  return { root, claude: path.join(root, 'claude') };
+}
+const claudeOnly = (fx, extra = {}) => aggregateUsage({
+  now: NOW, provider: 'claudeCode', copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [], claudeDirs: [fx.claude], ...extra,
+});
+
+test('Claude transcripts: oversized records are skipped without losing neighbours; records spanning read chunks are parsed', async () => {
+  const wide = 'é€😀'.repeat(60000); // multi-byte text that crosses several 64 KiB stream chunks
+  const fx = claudeFixture({
+    'big.jsonl': [
+      claudeLine({ id: 'before' }),
+      JSON.stringify({ type: 'user', timestamp: '2026-10-07T00:00:00.000Z', message: { usage: {} }, blob: 'x'.repeat(9 * 1024 * 1024) }),
+      claudeLine({ id: 'wide', content: wide }),
+      claudeLine({ id: 'after' }),
+    ],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.calls, 3);
+    assert.equal(r.diagnostics.claudeOversizedRecords, 1);
+    assert.ok(r.diagnostics.notes.some((note) => /1 oversized Claude Code transcript record/.test(note)));
+    assert.deepEqual(r.diagnostics.errors, []);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: equal-size duplicates keep the later record and never drop a recorded cost', async () => {
+  const same = { input_tokens: 100, output_tokens: 10 };
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: 'cost-last', usage: same }), claudeLine({ id: 'cost-last', usage: same, costUSD: 0.5 }),
+      claudeLine({ id: 'cost-first', usage: same, costUSD: 0.5 }), claudeLine({ id: 'cost-first', usage: same }),
+      // Same total tokens, reclassified as cheaper cache reads by the later record.
+      claudeLine({ id: 'reclassified', usage: { input_tokens: 1000, output_tokens: 10 } }),
+      claudeLine({ id: 'reclassified', usage: { input_tokens: 0, output_tokens: 10, cache_read_input_tokens: 1000 } }),
+    ],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.calls, 3);
+    assert.ok(Math.abs(r.totals.totalCredits - (50 + 50 + 0.075)) < 1e-9, `credits ${r.totals.totalCredits}`);
+    assert.equal(r.diagnostics.claudeDuplicates, 3);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: id-less copies are deduplicated by content and ids containing delimiters stay distinct', async () => {
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: null }),
+      claudeLine({ id: 'a:b', request: 'c', at: '2026-10-08T00:00:00.000Z' }),
+      claudeLine({ id: 'a', request: 'b:c', at: '2026-10-09T00:00:00.000Z' }),
+      claudeLine({ id: null, at: '2026-10-10T00:00:00.000Z' }),
+    ],
+    'a.orphaned-1760000000-ab12.jsonl': [claudeLine({ id: null })],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.calls, 4, 'the orphaned copy of the first id-less message is not counted again');
+    assert.equal(r.diagnostics.claudeDuplicates, 1);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: absurd numeric values cannot produce infinite or NaN totals', async () => {
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: 'huge-cost', costUSD: Number.MAX_VALUE }),
+      claudeLine({ id: 'huge-tokens', usage: { input_tokens: 1e300, output_tokens: 10 } }),
+    ],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    for (const value of [r.totals.totalCredits, r.totals.totalTokens, r.diagnostics.claudeCredits]) assert.ok(Number.isFinite(value));
+    assert.ok(Math.abs(r.totals.totalCredits - (0.25 + 0.025)) < 1e-9, 'an absurd recorded cost falls back to the list price');
+    assert.equal(r.totals.totalTokens, 1310 + 10);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: overlapping configured roots count each transcript once', async () => {
+  const fx = claudeFixture({});
+  try {
+    const nested = path.join(fx.claude, 'projects', 'p', 'projects', 'q');
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, 'x.jsonl'), `${claudeLine({ id: 'only' })}\n`);
+    touch(path.join(nested, 'x.jsonl'));
+    const r = await aggregateUsage({
+      now: NOW, provider: 'claudeCode', copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [],
+      claudeDirs: [fx.claude, path.join(fx.claude, 'projects', 'p')],
+    });
+    assert.equal(r.diagnostics.claudeTranscripts, 1);
+    assert.equal(r.diagnostics.claudeFiles, 1);
+    assert.equal(r.totals.calls, 1);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('provider "both" leaves Claude transcripts of VS Code chat sessions to the Copilot section', async () => {
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: 'copilot-owned', session: 'shared-vscode', at: '2026-10-05T00:00:01.000Z' }),
+      claudeLine({ id: 'claude-owned', session: 'claude-only', at: '2026-10-05T00:00:02.000Z' }),
+    ],
+  });
+  try {
+    const userDir = path.join(fx.root, 'Code', 'User');
+    const request = { timestamp: Date.parse('2026-10-05T00:00:00Z'), modelId: 'copilot/claude-opus-4.8', promptTokens: 1000, completionTokens: 100, copilotCredits: 5 };
+    writeChat(userDir, 'w1', 'shared.jsonl', JSON.stringify({ kind: 0, v: { sessionId: 'shared-vscode', requests: [request] } }));
+    const r = await aggregateUsage({
+      now: NOW, provider: 'both', copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [userDir], claudeDirs: [fx.claude],
+    });
+    assert.equal(r.githubCopilot.totals.totalCredits, 5);
+    assert.equal(r.githubCopilot.diagnostics.vscodeRequests, 1);
+    assert.equal(r.claudeCode.totals.calls, 1);
+    assert.equal(r.claudeCode.diagnostics.claudeSkippedCopilotSessions, 1);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('a call that names no provider returns separate sections, never one merged total', async () => {
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'm' })] });
+  try {
+    writeSession(path.join(fx.root, '.copilot'), 'S', [
+      ev('assistant.message', '2026-10-06T00:00:00.000Z', { model: 'claude-opus-4.8' }),
+      ev('session.shutdown', '2026-10-06T00:01:00.000Z', { totalNanoAiu: nano(3), modelMetrics: { 'claude-opus-4.8': metrics(1, 50, 5, 3) } }),
+    ]);
+    const base = { now: NOW, copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [], claudeDirs: [fx.claude] };
+    const r = await aggregateUsage(base);
+    assert.equal(r.provider, 'both');
+    assert.equal(r.githubCopilot.totals.totalCredits, 3);
+    assert.ok(Math.abs(r.claudeCode.totals.totalCredits - 0.25) < 1e-9);
+    assert.equal(r.models, undefined, 'there is no merged model list');
+    assert.equal((await aggregateUsage({ ...base, includeClaudeCode: false })).provider, 'githubCopilot');
+    assert.equal((await aggregateUsage({ ...base, includeGitHubCopilot: false })).provider, 'claudeCode');
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude price list covers Fable/Mythos and the Haiku 5.5 long-prompt tier', async () => {
+  assert.equal(normalizeClaudeModel('claude-fable-5-1'), 'claude-fable-5.1');
+  assert.equal(normalizeClaudeModel('claude-mythos-5-20260801'), 'claude-mythos-5');
+  assert.deepEqual([claudePrice('claude-fable-5.1').input, claudePrice('claude-fable-5.1').cacheRead, claudePrice('claude-fable-5.1').output], [10, 0.25, 50]);
+  assert.equal(claudePrice('claude-fable-5').cacheRead, 1);
+  assert.equal(claudePrice('claude-mythos-5.1').cacheWrite1h, 20);
+  assert.equal(claudePrice('claude-haiku-5.5').input, 0.1);
+  assert.equal(claudePrice('claude-haiku-5.5').longPrompt.input, 0.5);
+  assert.equal(claudePrice('claude-haiku-4.5').input, 1, 'Haiku 4.5 keeps its own rates');
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: 'short', model: 'claude-haiku-5-5', usage: { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 50000 } }),
+      claudeLine({ id: 'long', model: 'claude-haiku-5-5', usage: { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 150000 } }),
+    ],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    assert.ok(Math.abs(r.totals.totalCredits - (0.11 + 1.05)) < 1e-9, `credits ${r.totals.totalCredits}`);
+    assert.deepEqual(r.diagnostics.notes, []);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: tool-result spill files and MCP task state are not treated as transcripts', async () => {
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'real' })] });
+  try {
+    const session = path.join(fx.claude, 'projects', 'p', 'a');
+    for (const [dir, name] of [['tool-results', 'spill.jsonl'], ['mcp-tasks', 'task.jsonl'], ['subagents', 'agent-1.jsonl']]) {
+      fs.mkdirSync(path.join(session, dir), { recursive: true });
+      fs.writeFileSync(path.join(session, dir, name), `${claudeLine({ id: `from-${dir}`, at: '2026-10-08T00:00:00.000Z' })}\n`);
+      touch(path.join(session, dir, name));
+    }
+    const r = await claudeOnly(fx);
+    assert.equal(r.diagnostics.claudeTranscripts, 2, 'the session transcript and its subagent transcript');
+    assert.equal(r.totals.calls, 2);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('hostile model ids are capped and cannot make normalization expensive', async () => {
+  let started = Date.now();
+  normalizeClaudeModel('['.repeat(300000));
+  assert.ok(Date.now() - started < 1500, 'bracket-heavy ids normalize in linear time');
+  assert.ok(normalizeClaudeModel('x'.repeat(5000)).length <= 128);
+  assert.equal(normalizeClaudeModel('global.anthropic.claude-sonnet-4-5-v1:0'), 'claude-sonnet-4.5');
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'hostile', model: 'x['.repeat(100000) })] });
+  try {
+    started = Date.now();
+    const r = await claudeOnly(fx);
+    assert.ok(Date.now() - started < 5000, 'a hostile transcript cannot stall the scan');
+    assert.equal(r.totals.calls, 1);
+    assert.ok(r.models[0].model.length <= 128, 'the model name kept for display is bounded');
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: a malformed record never discards the valid records around it', async () => {
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: 'before' }),
+      claudeLine({ id: 'odd-numbers', usage: { input_tokens: { toString: null }, output_tokens: [1], cache_read_input_tokens: true, cache_creation_input_tokens: 'many' } }),
+      claudeLine({ id: 'odd-time', at: { toString: null } }),
+      claudeLine({ id: 'after' }),
+    ],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    assert.deepEqual(r.diagnostics.errors, []);
+    assert.equal(r.totals.calls, 3, 'before, after and the record whose numbers were unusable (counted with zero tokens)');
+    assert.equal(r.totals.totalTokens, 1310 + 1310);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('VS Code chat records with unusable numbers are reported, not fatal', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aucm-fixture-odd-chat-'));
+  try {
+    const userDir = path.join(root, 'Code', 'User');
+    const good = { timestamp: Date.parse('2026-10-05T00:00:00Z'), modelId: 'copilot/m', promptTokens: 10, completionTokens: 1, copilotCredits: 2 };
+    const odd = { ...good, timestamp: good.timestamp + 1, promptTokens: { toString: null }, copilotCredits: 'lots' };
+    writeChat(userDir, 'w', 'odd.jsonl', JSON.stringify({ kind: 0, v: { sessionId: 'odd', requests: [good, odd] } }));
+    const r = await aggregateUsage({ now: NOW, provider: 'githubCopilot', copilotHome: path.join(root, '.copilot'), vscodeUserDirs: [userDir] });
+    assert.deepEqual(r.diagnostics.errors, []);
+    assert.equal(r.totals.totalCredits, 2);
+    assert.ok(r.diagnostics.vscodeInvalidNumbers >= 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: ties prefer the more recently written copy, whatever order the files are read in', async () => {
+  for (const [active, orphan] of [['a.jsonl', 'a.orphaned-1760000000-ab12.jsonl'], ['z.jsonl', 'a.orphaned-1760000000-ab12.jsonl']]) {
+    const fx = claudeFixture({
+      [active]: [claudeLine({ id: 'm', usage: { input_tokens: 0, output_tokens: 10, cache_read_input_tokens: 1000 } })],
+      [orphan]: [claudeLine({ id: 'm', usage: { input_tokens: 1000, output_tokens: 10 } })],
+    });
+    try {
+      touch(path.join(fx.claude, 'projects', 'p', orphan), new Date('2026-10-14T00:00:00Z'));
+      const r = await claudeOnly(fx);
+      assert.equal(r.totals.calls, 1);
+      assert.ok(Math.abs(r.totals.totalCredits - 0.075) < 1e-9, `${active} vs ${orphan}: credits ${r.totals.totalCredits}`);
+    } finally {
+      fs.rmSync(fx.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('Claude transcripts: distinct requests and very long distinct ids are never merged', async () => {
+  const longId = (suffix) => `${'x'.repeat(200)}${suffix}`;
+  const fx = claudeFixture({
+    'a.jsonl': [
+      claudeLine({ id: null, request: 'r1' }), claudeLine({ id: null, request: 'r2' }),
+      claudeLine({ id: longId('A'), request: 'r' }), claudeLine({ id: longId('B'), request: 'r' }),
+      claudeLine({ id: 'same', request: longId('1') }), claudeLine({ id: 'same', request: longId('2') }),
+    ],
+  });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.calls, 6);
+    assert.equal(r.diagnostics.claudeDuplicates, 0);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude transcripts: a config directory reached through a link is read once', async (t) => {
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'only' })] });
+  try {
+    const alias = path.join(fx.root, 'alias');
+    try { fs.symlinkSync(fx.claude, alias, 'junction'); } catch { t.skip('links cannot be created here'); return; }
+    const r = await aggregateUsage({
+      now: NOW, provider: 'claudeCode', copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [], claudeDirs: [fx.claude, alias],
+    });
+    assert.equal(r.diagnostics.claudeTranscripts, 1);
+    assert.equal(r.totals.calls, 1);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('model names from files cannot carry terminal control or bidirectional characters', async () => {
+  assert.equal(normalizeModel('GPT-5\u001b[2J\u0007'), 'gpt-5[2j');
+  assert.equal(normalizeModel('\u0007\u202e'), 'unknown');
+  assert.equal(normalizeModel('copilot/\u202egpt-5'), 'gpt-5');
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'esc', model: 'claude-opus-4-8\u001b[31m\u0007\u202e-evil' })] });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.models.length, 1);
+    assert.equal(r.models[0].model, 'claude-opus-4-8[31m-evil');
+    assert.doesNotMatch(r.models[0].model, /[\u0000-\u001f\u007f-\u009f\u202a-\u202e]/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('unreadable Claude Code folders are reported once, by error code, without naming the project folder', async (t) => {
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'ok' })] });
+  try {
+    for (const secret of ['C--Users-bob-secret-merger', 'C--Users-bob-other-client']) {
+      fs.mkdirSync(path.join(fx.claude, 'projects', secret), { recursive: true });
+    }
+    const real = fs.readdirSync;
+    t.mock.method(fs, 'readdirSync', (dir, ...rest) => {
+      if (path.basename(path.dirname(String(dir))) === 'projects' && /secret|other/.test(String(dir))) {
+        const error = new Error(`EPERM: operation not permitted, scandir '${dir}'`);
+        error.code = 'EPERM';
+        throw error;
+      }
+      return real.call(fs, dir, ...rest);
+    });
+    const r = await claudeOnly(fx);
+    assert.deepEqual(Array.from(r.diagnostics.errors), ['Claude Code transcripts folder could not be read (EPERM)']);
+    assert.equal(r.totals.calls, 1, 'readable folders are still counted');
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Claude Code usage from a model without a list price keeps its tokens and reports the value as unavailable', async () => {
+  const fx = claudeFixture({ 'a.jsonl': [claudeLine({ id: 'x', model: 'claude-unreleased-9' })] });
+  try {
+    const r = await claudeOnly(fx);
+    assert.equal(r.totals.totalTokens, 1310);
+    assert.equal(r.totals.totalCredits, 0);
+    assert.ok(r.diagnostics.notes.some((note) => /no list price for: claude-unreleased-9 \(tokens counted, value unavailable\)/.test(note)));
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('CLAUDE_CONFIG_DIR names one directory, even when its path contains a comma', async () => {
+  const fx = claudeFixture({});
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  try {
+    const configured = path.join(fx.root, 'with,comma', 'claude');
+    const project = path.join(configured, 'projects', 'p');
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'a.jsonl'), `${claudeLine({ id: 'comma' })}\n`);
+    touch(path.join(project, 'a.jsonl'));
+    process.env.CLAUDE_CONFIG_DIR = configured;
+    const r = await aggregateUsage({ now: NOW, provider: 'claudeCode', copilotHome: path.join(fx.root, '.copilot'), vscodeUserDirs: [] });
+    assert.equal(r.totals.calls, 1);
+    assert.equal(r.diagnostics.claudeTranscripts, 1);
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previous;
+    fs.rmSync(fx.root, { recursive: true, force: true });
   }
 });

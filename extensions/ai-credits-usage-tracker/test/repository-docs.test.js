@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { aggregateUsage } = require('../lib/aggregate');
-const { DEMO_ACCOUNT, DEMO_MODELS, prepareScreenshotDemo } = require('./screenshot-demo');
+const { aggregateUsage, claudePrice } = require('../lib/aggregate');
+const { DEMO_ACCOUNT, DEMO_MODELS, DEMO_CLAUDE_MODELS, prepareScreenshotDemo } = require('./screenshot-demo');
 
 const project = path.resolve(__dirname, '..');
 const repository = path.resolve(project, '..', '..');
@@ -37,6 +37,22 @@ test('the Marketplace README clearly describes GitHub Copilot usage and compatib
   assert.ok(readme.includes(`apkola29.${manifest.name}`));
   assert.ok(readme.includes(`ai-usage-credits-meter-${manifest.version}.vsix`));
   assert.ok(readme.includes('https://marketplace.visualstudio.com/items?itemName=apkola29.ai-usage-credits-meter'));
+});
+
+test('the READMEs explain how Claude Code usage appears, what it measures and what it cannot show', () => {
+  const readme = fs.readFileSync(path.join(project, 'README.md'), 'utf8');
+  const landing = fs.readFileSync(path.join(repository, 'README.md'), 'utf8');
+  assert.match(readme, /## Claude Code usage/);
+  assert.match(readme, /Claude Code extension for VS Code/);
+  assert.match(readme, /API list-price/);
+  assert.match(readme, /subscription (charge|limit)/i);
+  assert.match(readme, /Remote|WSL/);
+  assert.match(readme, /lower bound/);
+  assert.match(readme, /best-effort/);
+  assert.match(readme, /~\/\.claude\/projects/);
+  assert.match(readme, /30 days/);
+  assert.match(readme, /`both`/);
+  assert.match(landing, /Claude Code/);
 });
 
 test('public overview pages do not link to missing local documentation or excluded private notes', () => {
@@ -107,18 +123,35 @@ test('screenshot fixtures read only isolated synthetic usage and never change th
     }
     const summary = await aggregateUsage({
       now,
-      provider: 'githubCopilot',
+      provider: 'both',
       copilotHome: demo.copilotHome,
       vscodeUserDirs: [path.join(userData, 'User')],
       claudeDirs: [demo.claudeHome],
       sortBy: 'credits',
     });
-    assert.deepEqual(summary.models.map((m) => m.model), DEMO_MODELS.map((m) => m.model));
-    assert.deepEqual(summary.models.map((m) => m.totalCredits), DEMO_MODELS.map((m) => m.credits));
-    assert.equal(summary.totals.totalCredits, 2500);
-    assert.equal(summary.diagnostics.cliRows, DEMO_MODELS.length);
-    assert.equal(summary.diagnostics.vscodeRequests, 0);
-    assert.deepEqual(summary.diagnostics.errors, []);
+    const copilot = summary.githubCopilot;
+    assert.deepEqual(copilot.models.map((m) => m.model), DEMO_MODELS.map((m) => m.model));
+    assert.deepEqual(copilot.models.map((m) => m.totalCredits), DEMO_MODELS.map((m) => m.credits));
+    assert.equal(copilot.totals.totalCredits, 2500);
+    assert.equal(copilot.diagnostics.cliRows, DEMO_MODELS.length);
+    assert.equal(copilot.diagnostics.vscodeRequests, 0);
+    assert.deepEqual(copilot.diagnostics.errors, []);
+
+    const claude = summary.claudeCode;
+    const priced = (spec) => {
+      const price = claudePrice(spec.model);
+      return spec.messages * (spec.input * price.input + spec.cacheRead * price.cacheRead
+        + spec.cacheWrite * price.cacheWrite5m + spec.output * price.output) / 1e6 * 100;
+    };
+    assert.deepEqual(claude.models.map((m) => m.model), DEMO_CLAUDE_MODELS.map((m) => m.model));
+    DEMO_CLAUDE_MODELS.forEach((spec, index) => {
+      assert.ok(Math.abs(claude.models[index].totalCredits - priced(spec)) < 1e-6, `${spec.model} API value`);
+      assert.equal(claude.models[index].totalTokens, spec.messages * (spec.input + spec.output + spec.cacheRead + spec.cacheWrite));
+      assert.equal(claude.models[index].calls, spec.messages);
+    });
+    assert.equal(claude.diagnostics.claudeSkippedCopilotSessions, 0);
+    assert.deepEqual(claude.diagnostics.errors, []);
+    assert.deepEqual(claude.diagnostics.notes, []);
     const identity = require(path.join(demo.demoExtension, 'lib', 'github-identity.js'));
     assert.deepEqual(await identity.githubIdentity(), { status: 'signedIn', id: 'demo-account', label: DEMO_ACCOUNT });
     await assert.rejects(identity.connectGitHub(), /disabled in screenshot-only demo mode/);

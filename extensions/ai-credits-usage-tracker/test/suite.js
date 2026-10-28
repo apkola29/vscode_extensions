@@ -32,19 +32,23 @@ exports.run = async function run() {
     t = Date.now();
     const r2 = await vscode.commands.executeCommand('aiUsageCreditsMeter.compute');
     out.cachedRunMs = Date.now() - t;
-    out.checks.workerCompletedAggregation = !!r.diagnostics.timings && Number.isFinite(r.diagnostics.elapsedMs);
-    out.checks.noErrors = r.diagnostics.errors.length === 0;
+    // The default provider returns separate GitHub Copilot and Claude Code summaries.
+    const copilot = (x) => x.githubCopilot || x;
+    out.checks.bothSectionsReturned = r.provider === 'both' && !!r.githubCopilot && !!r.claudeCode;
+    out.checks.workerCompletedAggregation = !!copilot(r).diagnostics.timings && Number.isFinite(copilot(r).diagnostics.elapsedMs);
+    out.checks.noErrors = copilot(r).diagnostics.errors.length === 0 && (!r.claudeCode || r.claudeCode.diagnostics.errors.length === 0);
     out.cycle = r.cycle;
-    out.top = r2.models.slice(0, 5).map((m) => ({ model: m.model, totalTokens: Math.round(m.totalTokens), totalCredits: Math.round(m.totalCredits), byTool: m.byTool }));
-    out.totals = r2.totals;
-    out.diagnostics = r2.diagnostics;
+    out.top = copilot(r2).models.slice(0, 5).map((m) => ({ model: m.model, totalTokens: Math.round(m.totalTokens), totalCredits: Math.round(m.totalCredits), byTool: m.byTool }));
+    out.totals = copilot(r2).totals;
+    out.diagnostics = copilot(r2).diagnostics;
+    out.claude = r2.claudeCode && { transcripts: r2.claudeCode.diagnostics.claudeTranscripts, models: r2.claudeCode.models.length };
 
     const shown = await vscode.commands.executeCommand('aiUsageCreditsMeter.show');
     out.popup = { title: shown.title, items: shown.items };
     await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
 
     out.ok = Object.entries(out.checks).every(([k, v]) => ['extensionPath', 'defaultProvider'].includes(k) || v === true)
-      && out.checks.defaultProvider === 'githubCopilot'
+      && out.checks.defaultProvider === 'both'
       && shown.items.length > 0;
   } catch (e) {
     out.error = e.stack;

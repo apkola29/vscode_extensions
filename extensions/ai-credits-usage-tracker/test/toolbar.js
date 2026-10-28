@@ -15,7 +15,10 @@ const vsixIndex = process.argv.indexOf('--vsix');
 const vsix = vsixIndex >= 0 ? path.resolve(process.argv[vsixIndex + 1]) : undefined;
 const screenshotsIndex = process.argv.indexOf('--screenshots');
 const screenshotsDir = screenshotsIndex >= 0 ? path.resolve(process.argv[screenshotsIndex + 1]) : undefined;
+// Runs against synthetic Copilot and Claude Code stores instead of the current user's real histories.
+const syntheticStores = process.argv.includes('--synthetic-stores');
 if (screenshotsDir && vsix) throw new Error('Screenshot demo mode is separate from exact-VSIX verification');
+if (screenshotsDir && syntheticStores) throw new Error('Screenshot demo mode already uses synthetic stores');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class Cdp {
@@ -122,6 +125,10 @@ async function main() {
     env.COPILOT_HOME = demo.copilotHome;
     env.CLAUDE_CONFIG_DIR = demo.claudeHome;
     fs.mkdirSync(screenshotsDir, { recursive: true });
+  } else if (syntheticStores) {
+    const stores = require('./screenshot-demo').prepareSyntheticStores(tmp, userData);
+    env.COPILOT_HOME = stores.copilotHome;
+    env.CLAUDE_CONFIG_DIR = stores.claudeHome;
   }
   if (vsix) {
     const quote = (s) => `"${s}"`;
@@ -138,6 +145,7 @@ async function main() {
     '--remote-debugging-address=127.0.0.1',
     '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes',
     '--disable-telemetry', '--disable-updates', '--new-window',
+    ...(screenshotsDir ? ['--force-color-profile=srgb'] : []),
   ], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let startupOutput = '';
   const retainStartupOutput = (chunk) => { startupOutput = (startupOutput + chunk.toString()).slice(-3000); };
@@ -198,10 +206,10 @@ async function main() {
         const element = ${expression};
         if (!element) throw new Error('Screenshot element not found');
         const r = element.getBoundingClientRect();
-        const x = Math.max(0, Math.floor(r.x));
-        const y = Math.max(0, Math.floor(r.y));
-        return { x, y, width: Math.min(innerWidth - x, Math.ceil(r.right) - x),
-          height: Math.min(innerHeight - y, Math.ceil(r.bottom) - y), scale: 1 };
+        const x = Math.max(0, Math.ceil(r.x) + 1);
+        const y = Math.max(0, Math.ceil(r.y) + 1);
+        return { x, y, width: Math.min(innerWidth - x, Math.floor(r.right) - 1 - x),
+          height: Math.min(innerHeight - y, Math.floor(r.bottom) - 1 - y), scale: 1 };
       })()`);
       const image = await cdp.send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: false });
       fs.writeFileSync(path.join(screenshotsDir, name), Buffer.from(image.data, 'base64'));
@@ -214,20 +222,24 @@ async function main() {
       const hover = Array.from(document.querySelectorAll('.monaco-hover')).find(e =>
         e.getBoundingClientRect().width > 0 && e.textContent.includes(${JSON.stringify(TITLE)}));
       if (!hover) return null;
-      return { provider: hover.textContent.includes('GitHub Copilot'), topModels: hover.querySelectorAll('tbody tr').length,
+      return { provider: /GitHub Copilot|Claude Code/.test(hover.textContent), topModels: hover.querySelectorAll('tbody tr').length,
         deviceScope: hover.textContent.includes('not an account-wide bill'), height: hover.getBoundingClientRect().height };
     })()`;
     const hover = await until(() => cdp.evaluate(hoverExpression), 15000, 'the small native hover table');
     assert.equal(hover.provider, true);
     assert.equal(hover.deviceScope, true);
-    assert.ok(hover.topModels > 0 && hover.topModels <= 5);
+    assert.ok(hover.topModels > 0 && hover.topModels <= 10, 'at most five models per provider section');
     assert.ok(hover.height < 600);
-    if (screenshotsDir) {
+    if (screenshotsDir || syntheticStores) {
       const demoText = await cdp.evaluate(`Array.from(document.querySelectorAll('.monaco-hover'))
         .find(e => e.textContent.includes(${JSON.stringify(TITLE)})).textContent`);
-      assert.ok(demoText.includes('demo-user'));
+      const demo = require('./screenshot-demo');
+      if (screenshotsDir) assert.ok(demoText.includes('demo-user'));
       assert.ok(demoText.includes('2,500 credits'));
-      for (const { model } of require('./screenshot-demo').DEMO_MODELS) assert.ok(demoText.includes(model));
+      assert.ok(demoText.includes('Claude Code'));
+      assert.ok(demoText.includes('API value'));
+      for (const { model } of demo.DEMO_MODELS) assert.ok(demoText.includes(model));
+      for (const { model } of demo.DEMO_CLAUDE_MODELS) assert.ok(demoText.includes(model));
     }
     await capture('usage-hover.png', `Array.from(document.querySelectorAll('.monaco-hover'))
       .find(e => e.textContent.includes(${JSON.stringify(TITLE)}))`);
@@ -245,17 +257,24 @@ async function main() {
       const close = Array.from(popup.querySelectorAll('.action-label')).find(e => e.title === 'Close' || e.getAttribute('aria-label') === 'Close');
       const r = close?.getBoundingClientRect();
       return { height: popup.getBoundingClientRect().height,
-        creditRows: Array.from(popup.querySelectorAll('.monaco-list-row')).filter(e => e.textContent.includes('credits')).length,
+        usageRows: Array.from(popup.querySelectorAll('.monaco-list-row')).filter(e => /credits|tokens/.test(e.textContent)).length,
+        text: popup.textContent,
         close: r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null };
     })()`;
     console.log('Clicking the actual status item, then exercising close, Escape and click-away');
     await click(button);
     const popup = await until(async () => {
       const value = await cdp.evaluate(popupExpression);
-      return value?.creditRows ? value : null;
+      return value?.usageRows ? value : null;
     }, 30000, 'the compact usage popup');
     assert.ok(popup.height < 600);
-    assert.ok(popup.creditRows > 0 && popup.creditRows <= 5);
+    assert.ok(popup.usageRows > 0 && popup.usageRows <= 10, 'at most five models per provider section');
+    if (screenshotsDir || syntheticStores) {
+      const demo = require('./screenshot-demo');
+      assert.ok(popup.text.includes('Claude 69.9M tokens'));
+      assert.ok(popup.text.includes('API list-price estimates'));
+      for (const { model } of demo.DEMO_CLAUDE_MODELS) assert.ok(popup.text.includes(model));
+    }
     assert.ok(popup.close);
     await capture('usage-popup.png', `document.querySelector('.quick-input-widget')`);
     assert.deepEqual(await cdp.evaluate(layoutExpression), initialLayout, 'Opening the popup must not reveal a panel or change editors');
@@ -270,9 +289,9 @@ async function main() {
     await click({ x: 100, y: 100 });
     await until(async () => !(await cdp.evaluate(popupExpression)), 10000, 'click-away dismissal');
     assert.deepEqual(await cdp.evaluate(layoutExpression), initialLayout);
-    result = { passed: true, mode: vsix ? 'installed-vsix' : 'source',
+    result = { passed: true, mode: vsix ? 'installed-vsix' : 'source', syntheticStores: syntheticStores || !!screenshotsDir,
       nativeHover: hover, hoverDismissesOnMouseLeave: true,
-      compactPopup: { creditRows: popup.creditRows, height: popup.height },
+      compactPopup: { usageRows: popup.usageRows, height: popup.height },
       closeButtonWorks: true, escapeCloses: true, clickAwayCloses: true, noPanelOrEditorOpened: true };
     passed = true;
   } catch (error) {

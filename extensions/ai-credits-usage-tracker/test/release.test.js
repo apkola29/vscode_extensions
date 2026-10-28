@@ -17,6 +17,7 @@ test('public manifest contains approved attribution and a real open-source licen
   assert.equal(manifest.displayName, 'GH Copilot Usage Tracker');
   assert.equal(manifest.name, 'ai-usage-credits-meter', 'existing Marketplace installs keep their extension identity');
   assert.match(manifest.description, /GitHub Copilot usage/);
+  assert.match(manifest.description, /Claude Code/);
   assert.doesNotMatch(manifest.description, /https?:\/\/|github\.com/i, 'repository links belong in dedicated metadata, not the short description');
   assert.ok(fs.readFileSync(path.join(root, 'LICENSE'), 'utf8').includes('MIT License'));
 });
@@ -37,5 +38,6 @@ test('VSIX packaging is allowlisted and cannot pick up local tests, profiles or 
   assert.equal(manifest.enabledApiProposals, undefined);
   assert.equal(manifest.contributes.viewsContainers, undefined);
   assert.equal(manifest.contributes.menus['chat/input/status'], undefined);
-  assert.equal(manifest.contributes.configuration.properties['aiUsageCreditsMeter.provider'].default, 'githubCopilot');
+  assert.equal(manifest.contributes.configuration.properties['aiUsageCreditsMeter.provider'].default, 'both');
+  assert.deepEqual(manifest.contributes.configuration.properties['aiUsageCreditsMeter.provider'].enum, ['both', 'githubCopilot', 'claudeCode']);
 });

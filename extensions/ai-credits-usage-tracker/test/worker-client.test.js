@@ -60,6 +60,39 @@ test('timeouts terminate the stalled worker and a retry gets a new worker', asyn
   await service.dispose();
 });
 
+test('a timeout or crash blames the request that was running; requests queued behind it are cancelled instead', async () => {
+  for (const failure of ['timeout', 'crash']) {
+    const { service, workers } = client({ timeoutMs: failure === 'timeout' ? 25 : 1000 });
+    const running = service.run({ sortBy: 'credits' }).catch((error) => error);
+    const queued = service.run({ sortBy: 'tokens' }).catch((error) => error);
+    await tick();
+    if (failure === 'crash') workers[0].emit('error', new Error('fixture worker failed'));
+    const [first, second] = await Promise.all([running, queued]);
+    assert.match(first.message, failure === 'timeout' ? /Timed out/ : /fixture worker failed/);
+    assert.equal(second.message, 'Usage scan was cancelled', `${failure}: the queued request is not blamed`);
+    await service.stopping;
+    const next = service.run({ sortBy: 'tokens' });
+    await tick();
+    assert.equal(workers.length, 2, `${failure}: the retry gets a fresh worker`);
+    workers[1].reply({ ok: true });
+    assert.deepEqual(await next, { ok: true });
+    await service.dispose();
+  }
+});
+
+test('an explicit stop gives every pending request the reason it was given', async () => {
+  const { service } = client();
+  const a = service.run({ sortBy: 'credits' }).catch((error) => error);
+  const b = service.run({ sortBy: 'tokens' }).catch((error) => error);
+  await tick();
+  await service.stop(new Error('GitHub sign-in changed; the previous usage scan was cancelled'));
+  assert.deepEqual((await Promise.all([a, b])).map((error) => error.message), [
+    'GitHub sign-in changed; the previous usage scan was cancelled',
+    'GitHub sign-in changed; the previous usage scan was cancelled',
+  ]);
+  await service.dispose();
+});
+
 test('the request queue is bounded and deactivation cancels pending work', async () => {
   const { service, workers } = client({ maxPending: 2 });
   const a = service.run({ sortBy: 'credits' });

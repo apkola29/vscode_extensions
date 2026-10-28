@@ -9,7 +9,9 @@ The public `apkola29` handle and its GitHub URLs are intentional project attribu
 
 ## GH Copilot Usage Tracker
 
-- Reads the current OS user's supported local usage stores and current VS Code profile in read-only mode.
+- Reads the current OS user's supported local usage stores and current VS Code profile in read-only mode. When
+  Claude Code usage is shown (the default `both` provider), it also reads only the `projects` transcript files
+  under Claude Code's config directory to count tokens; it never opens Claude sign-in, credential or account files.
 - Does not upload usage, prompts, transcripts, or authentication credentials.
 - Native GitHub authentication is handled by VS Code; only the selected account ID preference and displayed
   account label are used. The extension does not persist or log authentication tokens.

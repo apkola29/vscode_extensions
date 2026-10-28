@@ -1,8 +1,8 @@
 {
   "name": "ai-usage-credits-meter",
   "displayName": "GH Copilot Usage Tracker",
-  "description": "Track GitHub Copilot usage: local AI credits and tokens by model and monthly cycle, in a compact hover and popup. Independent community extension; not an account-wide billing report.",
-  "version": "0.4.3",
+  "description": "Track GitHub Copilot usage and local Claude Code tokens by model and monthly cycle, in a compact hover and popup. Independent community extension; not an account-wide billing report.",
+  "version": "0.5.0",
   "publisher": "apkola29",
   "author": "apkola29",
   "license": "MIT",
@@ -29,6 +29,8 @@
     "tokens",
     "copilot",
     "claude",
+    "claude-code",
+    "anthropic",
     "billing"
   ],
   "extensionKind": [
@@ -109,20 +111,23 @@
         "aiUsageCreditsMeter.provider": {
           "type": "string",
           "enum": [
+            "both",
             "githubCopilot",
             "claudeCode"
           ],
           "enumItemLabels": [
-            "GitHub Copilot",
-            "Claude Code (preview)"
+            "GitHub Copilot + Claude Code",
+            "GitHub Copilot only",
+            "Claude Code only (preview)"
           ],
           "enumDescriptions": [
-            "Read GitHub Copilot Chat, agent-host, SDK and CLI usage from local Copilot stores.",
-            "Read Claude Code transcript usage from local Claude configuration directories."
+            "Show GitHub Copilot credits and, when local Claude Code transcripts exist, a separate Claude Code section. Totals are never combined.",
+            "Read GitHub Copilot Chat, agent-host, SDK and CLI usage from local Copilot stores only.",
+            "Read Claude Code (VS Code extension and CLI) transcript usage from local Claude configuration directories only."
           ],
-          "default": "githubCopilot",
+          "default": "both",
           "scope": "machine",
-          "description": "Chat provider whose local usage data is shown. GitHub Copilot is the supported default."
+          "description": "Which local usage sources are shown. Claude Code values are API list-price estimates, not subscription charges."
         },
         "aiUsageCreditsMeter.sortBy": {
           "type": "string",
@@ -147,7 +152,7 @@
           },
           "default": [],
           "scope": "machine",
-          "description": "Claude Code config directories used only when the provider is Claude Code. Empty = CLAUDE_CONFIG_DIR, or ~/.config/claude and ~/.claude."
+          "description": "Claude Code config directories used when Claude Code usage is shown. Empty = CLAUDE_CONFIG_DIR, or ~/.config/claude and ~/.claude."
         }
       }
     }
@@ -159,6 +164,6 @@
     "test:vscode": "node test/run.js",
     "usage": "node scripts/cli.js",
     "package": "node scripts/package.js",
-    "package:vsce": "npx --yes @vscode/vsce@4.0.0 package --no-dependencies"
+    "package:vsce": "npx --yes @vscode/vsce@4.0.0 package --no-dependencies --baseContentUrl https://github.com/apkola29/vscode_extensions/blob/main/extensions/ai-credits-usage-tracker --baseImagesUrl https://github.com/apkola29/vscode_extensions/raw/main/extensions/ai-credits-usage-tracker"
   }
 }
