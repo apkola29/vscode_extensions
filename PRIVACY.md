@@ -7,7 +7,7 @@ Personal access tokens, passwords, account/email records, real local usage expor
 prompt/transcript content, debug logs, and machine-specific settings are excluded.
 The public `apkola29` handle and its GitHub URLs are intentional project attribution.
 
-## GH Copilot Usage Tracker
+## AI Credits Usage Tracker
 
 - Reads the current OS user's supported local usage stores and current VS Code profile in read-only mode. When
   Claude Code usage is shown (the default `both` provider), it also reads only the `projects` transcript files

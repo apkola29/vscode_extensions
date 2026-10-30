@@ -11,7 +11,7 @@ const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1
 const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
 
 function print(r) {
-  console.log(`GH Copilot Usage Tracker · ${r.provider} · billing cycle (UTC): ${r.cycle.start.slice(0, 10)} -> ${r.cycle.end.slice(0, 10)} · sorted by ${r.sortBy} (≈ = includes estimate)`);
+  console.log(`AI Credits Usage Tracker · ${r.provider} · billing cycle (UTC): ${r.cycle.start.slice(0, 10)} -> ${r.cycle.end.slice(0, 10)} · sorted by ${r.sortBy} (≈ = includes estimate)`);
   if (r.provider === 'claudeCode') console.log('Claude Code credits are API list-price estimates from local transcripts, not subscription charges or limits.');
   console.log('rank  model                 tokens  (exact | est)        output    credits (exact | est)       ~USD  calls pending  by tool');
   r.models.forEach((m, i) => {

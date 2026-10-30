@@ -1,8 +1,8 @@
 {
   "name": "ai-usage-credits-meter",
-  "displayName": "GH Copilot Usage Tracker",
+  "displayName": "AI Credits Usage Tracker",
   "description": "Track GitHub Copilot usage and local Claude Code tokens by model and monthly cycle, in a compact hover and popup. Independent community extension; not an account-wide billing report.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "apkola29",
   "author": "apkola29",
   "license": "MIT",
@@ -28,6 +28,7 @@
     "usage",
     "tokens",
     "copilot",
+    "github-copilot",
     "claude",
     "claude-code",
     "anthropic",
@@ -61,7 +62,7 @@
       {
         "command": "aiUsageCreditsMeter.openDashboard",
         "title": "Show Detailed Dashboard",
-        "category": "GH Copilot Usage Tracker",
+        "category": "AI Credits Usage Tracker",
         "icon": {
           "light": "./media/credits-tracker-light.svg",
           "dark": "./media/credits-tracker-dark.svg"
@@ -70,31 +71,31 @@
       {
         "command": "aiUsageCreditsMeter.connectAccount",
         "title": "Use My GitHub Account",
-        "category": "GH Copilot Usage Tracker",
+        "category": "AI Credits Usage Tracker",
         "icon": "$(github)"
       },
       {
         "command": "aiUsageCreditsMeter.refresh",
         "title": "Refresh Usage",
-        "category": "GH Copilot Usage Tracker",
+        "category": "AI Credits Usage Tracker",
         "icon": "$(refresh)"
       },
       {
         "command": "aiUsageCreditsMeter.selectProvider",
         "title": "Select Chat Provider",
-        "category": "GH Copilot Usage Tracker",
+        "category": "AI Credits Usage Tracker",
         "icon": "$(settings-gear)"
       },
       {
         "command": "aiUsageCreditsMeter.show",
         "title": "Show Compact Usage Popup",
-        "category": "GH Copilot Usage Tracker",
+        "category": "AI Credits Usage Tracker",
         "icon": "$(list-unordered)"
       },
       {
         "command": "aiUsageCreditsMeter.compute",
         "title": "Compute Credits Usage (JSON)",
-        "category": "GH Copilot Usage Tracker"
+        "category": "AI Credits Usage Tracker"
       }
     ],
     "menus": {
@@ -106,7 +107,7 @@
       ]
     },
     "configuration": {
-      "title": "GH Copilot Usage Tracker",
+      "title": "AI Credits Usage Tracker",
       "properties": {
         "aiUsageCreditsMeter.provider": {
           "type": "string",

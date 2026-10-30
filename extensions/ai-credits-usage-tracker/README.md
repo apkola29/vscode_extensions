@@ -1,8 +1,8 @@
-# GH Copilot Usage Tracker
+# AI Credits Usage Tracker
 
-**Track your GitHub Copilot usage by model: AI credits, input/output tokens, and monthly usage totals.**
+**Track your GitHub Copilot usage by model: AI credits, input/output tokens, and monthly usage totals, plus Claude Code token usage if you use it.**
 
-GH Copilot Usage Tracker works with **GitHub Copilot Chat in VS Code, Copilot agent sessions, the Copilot SDK, and Copilot CLI** using usage records available on your local device. It adds a compact **Copilot credits** indicator to the **bottom-right status bar**, with a small hover summary and click popup—not a Terminal or docked panel.
+AI Credits Usage Tracker works with **GitHub Copilot Chat in VS Code, Copilot agent sessions, the Copilot SDK, and Copilot CLI** using usage records available on your local device. It adds a compact **Copilot credits** indicator to the **bottom-right status bar**, with a small hover summary and click popup—not a Terminal or docked panel.
 
 **Also use Claude Code?** If the **Claude Code extension for VS Code** (or the Claude Code CLI) has written local transcripts on this device, its token usage by model appears in the **same hover and popup**, in its own section. No setup is needed; see [Claude Code usage](#claude-code-usage).
 
@@ -17,7 +17,7 @@ By default (`aiUsageCreditsMeter.provider` = `both`) the hover and popup have tw
 * **GitHub Copilot** — VS Code chat, agent sessions, SDK and CLI: AI credits and tokens by model.
 * **Claude Code** — listed only when local Claude Code transcripts exist: tokens and an API list-price value by model.
 
-The two are **never added together**: Copilot credits are what GitHub bills, while Claude Code values are estimates and not a Claude subscription charge. Use **GH Copilot Usage Tracker: Select Chat Provider** from the Command Palette (or the `aiUsageCreditsMeter.provider` setting) to show **GitHub Copilot only** or **Claude Code only**. A Claude or Gemini model used **inside GitHub Copilot** is Copilot usage and stays in the Copilot section.
+The two are **never added together**: Copilot credits are what GitHub bills, while Claude Code values are estimates and not a Claude subscription charge. Use **AI Credits Usage Tracker: Select Chat Provider** from the Command Palette (or the `aiUsageCreditsMeter.provider` setting) to show **GitHub Copilot only** or **Claude Code only**. A Claude or Gemini model used **inside GitHub Copilot** is Copilot usage and stays in the Copilot section.
 
 ## Install
 
@@ -25,7 +25,7 @@ Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.co
 run **Extensions: Install from VSIX...** and reload the window. Requires desktop VS Code **1.141 or newer**.
 This is an independent community extension, not an official GitHub or Anthropic product.
 
-The extension ID remains **`apkola29.ai-usage-credits-meter`** so existing installs update normally; its visible name is **GH Copilot Usage Tracker**. Command and setting IDs are unchanged for compatibility.
+The extension ID remains **`apkola29.ai-usage-credits-meter`**, so existing installs update normally; versions 0.4.2 and 0.4.3 were listed as *GH Copilot Usage Tracker*. Command and setting IDs are unchanged for compatibility.
 
 ## Screenshots
 
@@ -39,13 +39,13 @@ The compact indicator stays in the status bar without opening a Terminal or dock
 
 ### Hover summary
 
-![GH Copilot Usage Tracker hover with a GitHub Copilot credits section and a separate Claude Code tokens section, using demo data](media/screenshots/usage-hover.png)
+![AI Credits Usage Tracker hover with a GitHub Copilot credits section and a separate Claude Code tokens section, using demo data](media/screenshots/usage-hover.png)
 
 Hover to see each provider's cycle total and highest-used models; move the pointer away to dismiss.
 
 ### Click popup
 
-![Compact GH Copilot Usage Tracker popup grouping demo GitHub Copilot and Claude Code models, with ranking, refresh and close controls](media/screenshots/usage-popup.png)
+![Compact AI Credits Usage Tracker popup grouping demo GitHub Copilot and Claude Code models, with ranking, refresh and close controls](media/screenshots/usage-popup.png)
 
 Click for the floating list. Close it with **×**, **Esc**, or a click outside.
 
@@ -57,7 +57,7 @@ Click for the floating list. Close it with **×**, **Esc**, or a click outside.
 
 * Each compact row shows credits (Copilot) or API value (Claude Code) and tokens. Selecting a model copies its row.
 * The popup has **Refresh** and a **tokens/credits ranking toggle** (for Claude Code, "credits" ranks by API value).
-* **Command Palette:** `GH Copilot Usage Tracker: Show Compact Usage Popup` opens the same small list.
+* **Command Palette:** `AI Credits Usage Tracker: Show Compact Usage Popup` opens the same small list.
 * **Show Detailed Dashboard** remains optional in the Command Palette; it is never opened by a normal hover or click.
 * **Use My GitHub Account:** reuse VS Code's GitHub sign-in rather than entering a PAT or username.
 
@@ -140,9 +140,9 @@ npm run test:vscode -- --agents # run it in the Agents/Sessions window
 npm run test:popup     # real hover -> mouse-leave dismissal; click -> close/Escape/click-away
 npm run package        # build the .vsix offline
 npm run package:vsce   # standard vsce package and its credential/file checks
-node test\toolbar.js --vsix ai-usage-credits-meter-0.5.0.vsix # same native-UI test on the installed package
+node test\toolbar.js --vsix ai-usage-credits-meter-0.5.1.vsix # same native-UI test on the installed package
 node test\toolbar.js --screenshots media\screenshots # regenerate public-safe demo screenshots
-code --install-extension ai-usage-credits-meter-0.5.0.vsix
+code --install-extension ai-usage-credits-meter-0.5.1.vsix
 ```
 
 Requires VS Code 1.141+. It uses the built-in `node:sqlite`, so there are no native dependencies. UI-click tests launch an isolated profile with a temporary loopback debugging port and stop only their owned processes (matching PID and creation time) on exit; those test scripts are excluded from the VSIX.

@@ -5,7 +5,7 @@ const vscode = require('vscode');
 const { UsageWorkerClient } = require('./lib/worker-client');
 const { githubIdentity, connectGitHub } = require('./lib/github-identity');
 
-const TRACKER_NAME = 'GH Copilot Usage Tracker';
+const TRACKER_NAME = 'AI Credits Usage Tracker';
 const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n)));
 const credits = (n) => Math.round(n).toLocaleString('en-US');
 const usd = (c) => `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

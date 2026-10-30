@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Rename the extension to **AI Credits Usage Tracker** now that it reports Claude Code usage as well as GitHub Copilot. The listing, status-bar hover, popup, Command Palette categories, settings page and output channel use the new name. The description, the README opening and the search keywords still say plainly that it tracks GitHub Copilot usage.
+- The extension ID (`apkola29.ai-usage-credits-meter`), command IDs, setting IDs and repository directory are unchanged, so existing installs update in place and keep their settings.
+- Refresh the screenshots so the hover and popup show the new name. Usage accounting is unchanged from 0.5.0.
+
 ## 0.5.0
 
 - Show **Claude Code** token usage in the same hover and compact popup as GitHub Copilot, in its own section. It covers the Claude Code extension for VS Code and the Claude Code CLI, which share local transcripts.

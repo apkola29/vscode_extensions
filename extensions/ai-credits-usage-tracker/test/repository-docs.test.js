@@ -32,6 +32,10 @@ test('the Marketplace README clearly describes GitHub Copilot usage and compatib
   const readme = fs.readFileSync(path.join(project, 'README.md'), 'utf8');
   assert.equal(readme.split(/\r?\n/, 1)[0], `# ${manifest.displayName}`);
   assert.match(readme, /Track your GitHub Copilot usage by model/);
+  // The name no longer says Copilot, so the opening of the Marketplace overview must say what it works with.
+  const intro = readme.split(/^## /m, 1)[0];
+  assert.match(intro, /GitHub Copilot Chat in VS Code, Copilot agent sessions, the Copilot SDK, and Copilot CLI/);
+  assert.match(intro, /Claude Code/);
   assert.match(readme, /Copilot Chat in VS Code, Copilot agent sessions, the Copilot SDK, and Copilot CLI/);
   assert.match(readme, /not an official GitHub product or an account-wide billing report/);
   assert.ok(readme.includes(`apkola29.${manifest.name}`));

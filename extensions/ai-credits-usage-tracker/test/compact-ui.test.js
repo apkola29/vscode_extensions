@@ -190,7 +190,7 @@ test('default UI is an untrusted native hover with only the top five models, not
     const item = h.statusItems[0];
     assert.equal(item.visible, true);
     assert.equal(item.command, 'aiUsageCreditsMeter.show');
-    assert.equal(item.accessibilityInformation.label, 'GH Copilot Usage Tracker');
+    assert.equal(item.accessibilityInformation.label, 'AI Credits Usage Tracker');
     assert.match(item.text, /Copilot/);
     assert.match(item.text, /360 credits/);
     assert.equal(item.tooltip.isTrusted, false);
@@ -216,7 +216,7 @@ test('click opens a small popup with close, focus-loss dismissal and reusable ca
     assert.equal(pick.items[5].expand, true);
     assert.ok(pick.buttons.some((b) => b.iconPath.id === 'close'));
     assert.match(shown.title, /360 credits/);
-    assert.match(shown.title, /^GH Copilot Usage Tracker/);
+    assert.match(shown.title, /^AI Credits Usage Tracker/);
     assert.equal(h.scans, 1, 'click reuses the startup summary instead of creating another scan');
     await h.commands.get('aiUsageCreditsMeter.show')();
     assert.equal(h.picks.length, 1, 'repeated clicks do not leak popups');
@@ -376,7 +376,7 @@ test('popup groups rows by provider, expands both sections and copies a labelled
       '1. claude-model-6', '2. claude-model-5', '3. claude-model-4', '4. claude-model-3', '5. claude-model-2',
       '$(list-unordered) Show all 14 models',
     ]);
-    assert.match(shown.title, /^GH Copilot Usage Tracker · ≈360 credits · Claude 42\.0M tokens$/);
+    assert.match(shown.title, /^AI Credits Usage Tracker · ≈360 credits · Claude 42\.0M tokens$/);
     assert.equal(pick.placeholder, 'GitHub Copilot + Claude Code · Oct 1–Nov 1 UTC · tokens · local history');
     assert.equal(h.scans, 1);
 

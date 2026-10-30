@@ -262,8 +262,8 @@ This manual-mode preview is published with the owner's approval in the
 Repository CI runs synthetic tests and type checks; it does not publish automatically or silently start a power hold.
 Native Auto and unattended-sleep claims remain separately blocked until their evidence gates pass.
 
-The companion [GH Copilot Usage Tracker](../ai-credits-usage-tracker/README.md) tracks local GitHub Copilot
-credits and tokens. It is a separate extension; installing it does not enable keep-awake behavior.
+The companion [AI Credits Usage Tracker](../ai-credits-usage-tracker/README.md) tracks local GitHub Copilot
+credits and tokens, and local Claude Code tokens. It is a separate extension; installing it does not enable keep-awake behavior.
 
 License: [MIT](LICENSE).
 

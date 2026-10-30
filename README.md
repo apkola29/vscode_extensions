@@ -5,7 +5,7 @@ Two independent VS Code extensions maintained under the public `apkola29` namesp
 | Project | Purpose | Status |
 | --- | --- | --- |
 | [Agent Keep-Awake](extensions/agent-keep-awake/README.md) | Explicit, OS-native sleep prevention with Off / Keep awake / timed-session controls. | Manual-mode preview; automatic Copilot activity detection is unavailable. |
-| [GH Copilot Usage Tracker](extensions/ai-credits-usage-tracker/README.md) | Tracks **GitHub Copilot usage** (credits and tokens by model/month) and, when local transcripts exist, **Claude Code** token usage in a separate section, in a compact hover and popup. | GitHub Copilot is the supported default; Claude Code usage is a preview. |
+| [AI Credits Usage Tracker](extensions/ai-credits-usage-tracker/README.md) | Tracks **GitHub Copilot usage** (credits and tokens by model/month) and, when local transcripts exist, **Claude Code** token usage in a separate section, in a compact hover and popup. | GitHub Copilot is the supported default; Claude Code usage is a preview. |
 
 Neither extension reroutes prompts, modifies Copilot, or requires a hardcoded identity.
 Each project has its own manifest, license, tests, and independently installable VSIX.
@@ -17,22 +17,22 @@ In VS Code, use **Extensions: Install from VSIX...**, then reload that window.
 
 Marketplace listings:
 
-- [GH Copilot Usage Tracker](https://marketplace.visualstudio.com/items?itemName=apkola29.ai-usage-credits-meter) — `apkola29.ai-usage-credits-meter`.
+- [AI Credits Usage Tracker](https://marketplace.visualstudio.com/items?itemName=apkola29.ai-usage-credits-meter) — `apkola29.ai-usage-credits-meter`.
 - [Agent Keep-Awake](https://marketplace.visualstudio.com/items?itemName=apkola29.agent-keep-awake) — `apkola29.agent-keep-awake`; choose the **pre-release** manual-mode preview.
 
 The stable extension IDs and project directories are retained for compatibility. Tracker usage is local/device-scoped, not an official account-wide GitHub bill; Claude Code values are API list-price estimates, not Claude subscription charges or limits. Keep-awake does not automatically detect Copilot activity or chat completion.
 
-## GH Copilot Usage Tracker preview
+## AI Credits Usage Tracker preview
 
 Native VS Code screenshots using **synthetic usage and a fictional demo account**, not personal account data.
 
 **Hover for each provider's cycle total and highest-used models (GitHub Copilot, plus Claude Code when its local transcripts exist):**
 
-![GH Copilot Usage Tracker native hover with a synthetic GitHub Copilot credits section and a separate Claude Code tokens section](extensions/ai-credits-usage-tracker/media/screenshots/usage-hover.png)
+![AI Credits Usage Tracker native hover with a synthetic GitHub Copilot credits section and a separate Claude Code tokens section](extensions/ai-credits-usage-tracker/media/screenshots/usage-hover.png)
 
 **Click for a compact, dismissible model list grouped by provider:**
 
-![GH Copilot Usage Tracker compact popup with synthetic GitHub Copilot and Claude Code models, plus ranking, refresh and close buttons](extensions/ai-credits-usage-tracker/media/screenshots/usage-popup.png)
+![AI Credits Usage Tracker compact popup with synthetic GitHub Copilot and Claude Code models, plus ranking, refresh and close buttons](extensions/ai-credits-usage-tracker/media/screenshots/usage-popup.png)
 
 See the [tracker README](extensions/ai-credits-usage-tracker/README.md#screenshots) for the status-bar indicator, screenshots, and usage instructions, and [Claude Code usage](extensions/ai-credits-usage-tracker/README.md#claude-code-usage) for what is and is not measured. These images illustrate the interface, not model availability or pricing.
 

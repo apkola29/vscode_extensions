@@ -6,7 +6,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 
-const TITLE = 'GH Copilot Usage Tracker';
+const TITLE = 'AI Credits Usage Tracker';
 const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const extensionId = `${manifest.publisher}.${manifest.name}`;
